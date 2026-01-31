@@ -1,0 +1,61 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Restaurant DES (Modular)</title>
+  <style>
+    body { margin: 0; background: #111; }
+    canvas { display: block; margin: auto; background: #222; }
+  </style>
+</head>
+<body>
+<canvas id="c" width="900" height="600"></canvas>
+
+<script src="objects.js"></script>
+<script src="functions.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Kitchen
+const kitchen = new Kitchen(420, 20, 60, 20);
+
+// Tables
+const tables = [];
+let tid = 0;
+for (let y = 120; y < 480; y += 80) {
+  for (let x = 120; x < 760 && tid < 18; x += 80) {
+    tables.push(new Table(tid++, x, y));
+  }
+}
+
+// Waiters
+const waiters = [];
+for (let i = 0; i < 6; i++) {
+  waiters.push(new Waiter(i, 50, 100 + i * 60));
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = (now - last) / 1000;
+  last = now;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  tables.forEach(t => t.update(dt));
+  assignTasks(waiters, tables, kitchen);
+
+  kitchen.draw(ctx);
+  tables.forEach(t => t.draw(ctx));
+  waiters.forEach(w => {
+    w.move(dt, tables, waiters);
+    w.draw(ctx);
+  });
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

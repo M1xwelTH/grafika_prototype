@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>WebGL Pharmacy Simulation</title>
+<style>
+canvas { border: 2px solid black; }
+</style>
+</head>
+<body>
+
+<canvas id="glCanvas" width="900" height="500"></canvas>
+
+<script src="objects.js"></script>
+<script src="functions.js"></script>
+
+<script>
+/* =====================
+   WEBGL SETUP
+===================== */
+const canvas = document.getElementById("glCanvas");
+const gl = canvas.getContext("webgl");
+if (!gl) alert("WebGL not supported");
+
+/* =====================
+   SHADERS
+===================== */
+const vsSource = `
+attribute vec2 a_position;
+uniform vec2 u_resolution;
+void main() {
+    vec2 zeroToOne = a_position / u_resolution;
+    vec2 clipSpace = zeroToOne * 2.0 - 1.0;
+    gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+}`;
+const fsSource = `
+precision mediump float;
+uniform vec4 u_color;
+void main() {
+    gl_FragColor = u_color;
+}`;
+
+/* =====================
+   SHADER HELPERS
+===================== */
+function createShader(gl, type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+        return null;
+    }
+    return s;
+}
+function createProgram(gl, vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, createShader(gl, gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, createShader(gl, gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(p));
+        return null;
+    }
+    return p;
+}
+
+const program = createProgram(gl, vsSource, fsSource);
+gl.useProgram(program);
+
+window.positionLocation = gl.getAttribLocation(program, "a_position");
+window.colorLocation = gl.getUniformLocation(program, "u_color");
+gl.uniform2f(
+    gl.getUniformLocation(program, "u_resolution"),
+    canvas.width, canvas.height
+);
+
+const buffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+gl.enableVertexAttribArray(positionLocation);
+gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+/* =====================
+   GLOBAL STATE
+===================== */
+window.medicines = [];
+window.customers = [];
+window.deskWorkers = [];
+window.storeWorkers = [];
+
+window.walls = [];
+window.doorways = [
+    { x: 305, y: 210 },
+    { x: 505, y: 210 },
+    { x: 705, y: 210 }
+];
+
+/* =====================
+   WALLS
+===================== */
+walls.push(new Wall(300, 0, 10, 180));
+walls.push(new Wall(300, 240, 10, 260));
+walls.push(new Wall(500, 0, 10, 180));
+walls.push(new Wall(500, 240, 10, 260));
+walls.push(new Wall(700, 0, 10, 180));
+walls.push(new Wall(700, 240, 10, 260));
+
+/* =====================
+   STORAGE
+===================== */
+const deskStorage = new StorageArea(600, 80, 250, 40);
+const mainStorage = new StorageArea(600, 200, 250, 60);
+
+/* =====================
+   WORKERS
+===================== */
+for (let i = 0; i < 2; i++) {
+    deskWorkers.push(new Worker(200, 100 + i * 60, "desk"));
+    storeWorkers.push(new Worker(200, 250 + i * 60, "store"));
+}
+
+/* =====================
+   SPAWN
+===================== */
+setInterval(spawnMedicine, 3000);
+setInterval(spawnCustomer, 4000);
+
+/* =====================
+   LOOP
+===================== */
+let last = 0;
+function loop(t) {
+    const dt = (t - last) / 1000;
+    last = t;
+
+    [...medicines, ...customers, ...deskWorkers, ...storeWorkers]
+        .forEach(e => e.update(dt));
+
+    gl.clearColor(1,1,1,1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    walls.forEach(w => w.draw(gl));
+    deskStorage.draw(gl);
+    mainStorage.draw(gl);
+
+    medicines.forEach(m => m.draw(gl));
+    customers.forEach(c => c.draw(gl));
+    deskWorkers.forEach(w => w.draw(gl));
+    storeWorkers.forEach(w => w.draw(gl));
+
+    requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
