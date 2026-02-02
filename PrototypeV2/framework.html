@@ -7,10 +7,24 @@
         body {
             margin: 0;
             overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            line-height: 1.6;
         }
     </style>
 </head>
 <body>
+
+<div id="hud"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="rack.js"></script>
@@ -42,15 +56,35 @@
     dirLight.position.set(5, 10, 5);
     scene.add(dirLight);
 
-    // Create rack
-    const { rackGroup, shelves } = createMedicineRack();
+    // Rack
+    const { rackGroup, shelves, boxesByLevel } = createMedicineRack();
     scene.add(rackGroup);
 
-    // Add random medicine every 5 seconds
+    // HUD update
+    function updateHUD() {
+        const hud = document.getElementById("hud");
+        hud.innerHTML = `
+            <strong>Medicine Count</strong><br>
+            A: ${medicines.A.count} / ${medicines.A.max}<br>
+            B: ${medicines.B.count} / ${medicines.B.max}<br>
+            C: ${medicines.C.count} / ${medicines.C.max}<br>
+            D: ${medicines.D.count} / ${medicines.D.max}
+        `;
+    }
+
+    // Add medicine every 3s
     setInterval(() => {
         addRandomMedicine();
-        updateRackColors(shelves);
-    }, 5000);
+        updateBoxes(boxesByLevel);
+        updateHUD();
+    }, 3000);
+
+    // Consume medicine every 9s
+    setInterval(() => {
+        consumeRandomMedicine();
+        updateBoxes(boxesByLevel);
+        updateHUD();
+    }, 9000);
 
     // Resize
     window.addEventListener("resize", () => {
@@ -66,6 +100,7 @@
         renderer.render(scene, camera);
     }
 
+    updateHUD();
     animate();
 </script>
 
