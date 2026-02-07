@@ -1,3 +1,3 @@
 # grafika_prototype
-Prototype project grafika
-Files berada di branch master
+Prototype project grafika.
+Files berada di branch master.
