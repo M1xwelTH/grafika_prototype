@@ -1,0 +1,10 @@
+This is an ambitious part that will attempt to integrate both 2D and 3D aspect when possible
+2D would be simulation map while 3D would visualize the changes in the rack
+Whether or not this will work is beyond me...
+Hopefully it would be achievable before UTS and UAS, but with current workload of work and college it may be difficult...
+
+LOG:
+.Ver0
+Add texts
+-by Max
+//Add any other ones here

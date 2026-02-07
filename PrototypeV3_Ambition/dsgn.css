@@ -1,0 +1,21 @@
+body
+{
+    background-color: blue;
+}
+canvas
+{
+    background-color: black;
+    width: 1000px;
+    height: 600px;
+}
+.titular
+{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+a
+{
+    color:white;
+}

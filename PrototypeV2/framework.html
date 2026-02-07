@@ -9,7 +9,6 @@
             overflow: hidden;
             font-family: Arial, sans-serif;
         }
-
         #hud {
             position: absolute;
             top: 10px;
@@ -30,26 +29,22 @@
 <script src="rack.js"></script>
 
 <script>
-    // Scene
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf2f2f2);
 
-    // Camera
     const camera = new THREE.PerspectiveCamera(
         60,
         window.innerWidth / window.innerHeight,
         0.1,
         100
     );
-    camera.position.set(6, 6, 9);
+    camera.position.set(0, 6, 9);
     camera.lookAt(0, 2.5, 0);
 
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Lights
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -57,46 +52,41 @@
     scene.add(dirLight);
 
     // Rack
-    const { rackGroup, shelves, boxesByLevel } = createMedicineRack();
+    const { rackGroup, shelves, boxObjects } = createMedicineRack();
     scene.add(rackGroup);
 
-    // HUD update
+    // HUD
     function updateHUD() {
         const hud = document.getElementById("hud");
-        hud.innerHTML = `
-            <strong>Medicine Count</strong><br>
-            A: ${medicines.A.count} / ${medicines.A.max}<br>
-            B: ${medicines.B.count} / ${medicines.B.max}<br>
-            C: ${medicines.C.count} / ${medicines.C.max}<br>
-            D: ${medicines.D.count} / ${medicines.D.max}
-        `;
+
+        let html = "<strong>Boxes</strong><br>";
+        boxObjects.forEach(b => {
+            html += `${b.id}: ${b.count} / ${b.capacity}<br>`;
+        });
+
+        hud.innerHTML = html;
     }
 
-    // Add medicine every 3s
     setInterval(() => {
-        addRandomMedicine();
-        updateBoxes(boxesByLevel);
+        addRandomMedicine(boxObjects);
+        updateBoxes(boxObjects);
         updateHUD();
-    }, 3000);
+    }, 500); //1/2s
 
-    // Consume medicine every 9s
     setInterval(() => {
-        consumeRandomMedicine();
-        updateBoxes(boxesByLevel);
+        consumeRandomMedicine(boxObjects);
+        updateBoxes(boxObjects);
         updateHUD();
-    }, 9000);
+    }, 1000); //1s
 
-    // Resize
     window.addEventListener("resize", () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // Animate
     function animate() {
         requestAnimationFrame(animate);
-        rackGroup.rotation.y += 0.002;
         renderer.render(scene, camera);
     }
 
