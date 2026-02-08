@@ -28,8 +28,18 @@ let rackOccupied = false;
 const SEARCH_DELAY = 400;
 const INTERACTION_DELAY = 600;
 
-const arrivalWorker = { type:"arrival", busy:false };
-const orderWorker = { type:"order", busy:false };
+const arrivalWorker = {
+    type:"arrival",
+    busy:false,
+    state:"Idle"
+};
+
+const orderWorker = {
+    type:"order",
+    busy:false,
+    state:"Idle"
+};
+
 
 let workerShadow = null;
 let searchIndicator = null;
@@ -69,27 +79,23 @@ function createSearchIndicator(scene){
     scene.add(searchIndicator);
 }
 
-function highlightInteraction(box){
+function setBoxTempColor(box, colorHex){
 
-    const originalColor = box.mesh.material.color.clone();
+    // Save original color if not already saved
+    if(!box._originalColor){
+        box._originalColor = box.mesh.material.color.clone();
+    }
 
-    // flash white
-    box.mesh.material.color.set(0xffffff);
-
-    setTimeout(()=>{
-        box.mesh.material.color.copy(originalColor);
-    },300);
+    box.mesh.material.color.set(colorHex);
 }
 
-function highlightRecognition(box){
 
-    const originalColor = box.mesh.material.color.clone();
+function restoreBoxColor(box){
 
-    box.mesh.material.color.set(0xff8800); // orange glow
-
-    setTimeout(()=>{
-        box.mesh.material.color.copy(originalColor);
-    },400);
+    if(box._originalColor){
+        box.mesh.material.color.copy(box._originalColor);
+        box._originalColor = null;
+    }
 }
 
 
@@ -134,57 +140,178 @@ function getTraversalOrder(boxObjects){
 // =========================
 async function simulateSearch(worker,targetIDs,boxObjects){
 
+    const startTime = performance.now();
+
+    console.log(
+        `[SEARCH START] Worker: ${worker.type} | Targets: ${targetIDs.join(", ")} | Time: ${startTime.toFixed(2)}`
+    );
+
     rackOccupied = true;
     worker.busy = true;
+    worker.state = "Searching";
 
     workerShadow.visible = true;
 
-    const traversal = getTraversalOrder(boxObjects);
+const traversal = getTraversalOrder(boxObjects);
 
-    for(const targetID of targetIDs){
+// Tracks where worker currently is
+let currentIndex = 0;
 
-        for(const box of traversal){
+for(const targetID of targetIDs){
 
-            searchIndicator.visible = true;
-            searchIndicator.position.copy(box.mesh.position);
+    let found = false;
+    let scannedCount = 0;
 
-            await delay(SEARCH_DELAY);
+    while(!found && scannedCount < traversal.length){
 
-            if(box.id === targetID){
+        const box = traversal[currentIndex];
 
-            // Recognition moment
-            highlightRecognition(box);
-            await delay(400); // human recognition delay
+        worker.state = `Searching ${box.id}`;
 
-            // Interaction moment
-            highlightInteraction(box);
+        searchIndicator.visible = true;
+        searchIndicator.position.copy(box.mesh.position);
+
+        // SEARCH WHITE
+        setBoxTempColor(box,0xffffff);
+
+        await delay(SEARCH_DELAY);
+
+        // Not correct box
+        if(box.id !== targetID){
+            restoreBoxColor(box);
+        }
+
+        // Found correct box
+        if(box.id === targetID){
+
+            worker.state = `Interacting ${box.id}`;
+
+            setBoxTempColor(box,0xff8800);
+
             await delay(INTERACTION_DELAY);
 
-            break;
+            restoreBoxColor(box);
+
+            found = true;
         }
 
-        }
+        // Move forward through rack
+        currentIndex = (currentIndex + 1) % traversal.length;
+        scannedCount++;
     }
+}
+
+    const endTime = performance.now();
+    const duration = ((endTime-startTime)/1000).toFixed(2);
+
+    console.log(
+        `[SEARCH END] Worker: ${worker.type} | Duration: ${duration}s`
+    );
 
     searchIndicator.visible = false;
     workerShadow.visible = false;
 
     worker.busy = false;
+    worker.state = "Idle";
     rackOccupied = false;
 }
-
 
 // =========================
 // DELIVERY
 // =========================
+const supplierQueue = [];
+function checkReorderTriggers(boxObjects){
+
+    boxObjects.forEach(box => {
+
+        // Only trigger if exactly at threshold
+        if(box.count === 10){
+
+            // Prevent duplicate queue entries
+            const alreadyQueued =
+                supplierQueue.some(item => item.id === box.id);
+
+            if(!alreadyQueued){
+
+                console.log(`[SUPPLIER ORDER] ${box.id} scheduled for +40`);
+
+                supplierQueue.push({
+                    id: box.id,
+                    qty: 40
+                });
+            }
+        }
+
+    });
+}
+
+function weightedRandomBox(boxObjects){
+
+    // Build weight list
+    let weightedList = [];
+    let totalWeight = 0;
+
+    boxObjects.forEach(box => {
+
+        const emptiness = 1 - (box.count / box.capacity);
+
+        // Prevent zero chance completely
+        const weight = Math.max(emptiness, 0.05);
+
+        weightedList.push({
+            box: box,
+            weight: weight
+        });
+
+        totalWeight += weight;
+    });
+
+    // Roll weighted random
+    let roll = Math.random() * totalWeight;
+
+    for(const entry of weightedList){
+
+        if(roll < entry.weight){
+            return entry.box;
+        }
+
+        roll -= entry.weight;
+    }
+
+    return weightedList[0].box;
+}
+
+function generateDeliveryBatch(boxObjects){
+
+    // Priority supplier queue first
+    if(supplierQueue.length > 0){
+
+        const supplierOrder = supplierQueue.shift();
+
+        return [
+            {
+                id: supplierOrder.id,
+                qty: supplierOrder.qty
+            }
+        ];
+    }
+
+    // Otherwise do weighted normal delivery
+    const selectedBox = weightedRandomBox(boxObjects);
+
+    return [
+        {
+            id: selectedBox.id,
+            qty: 10
+        }
+    ];
+}
+
+
 async function processDelivery(boxObjects){
 
     if(rackOccupied || arrivalWorker.busy) return;
-
-    const batch = [
-        {id:"A1",qty:3},
-        {id:"B3",qty:2}
-    ];
+    const batch = generateDeliveryBatch(boxObjects);
 
     await simulateSearch(arrivalWorker,batch.map(b=>b.id),boxObjects);
 
@@ -209,12 +336,54 @@ async function processDelivery(boxObjects){
 // =========================
 // ORDER
 // =========================
+function generateOrderBatch(boxObjects){
+
+    const roll = Math.random() * 100;
+
+    // -------- Batch 1 (35%)
+    if(roll < 35){
+        return [
+            { id: "A1", qty: 10 },
+            { id: "B3", qty: 5 }
+        ];
+    }
+
+    // -------- Batch 2 (15%)
+    else if(roll < 50){
+        return [
+            { id: "B1", qty: 8 },
+            { id: "C2", qty: 4 },
+            { id: "D4", qty: 5 }
+        ];
+    }
+
+    // -------- Batch 3 (30%)
+    else if(roll < 80){
+        return [
+            { id: "C4", qty: 10 },
+            { id: "D1", qty: 2 }
+        ];
+    }
+
+    // -------- Random Batch (20%)
+    else{
+
+        const randomBox =
+            boxObjects[Math.floor(Math.random() * boxObjects.length)];
+
+        const qty = Math.floor(Math.random() * 10) + 1;
+
+        return [
+            { id: randomBox.id, qty: qty }
+        ];
+    }
+}
+
 async function processOrder(boxObjects){
 
     if(rackOccupied || orderWorker.busy) return;
 
-    const randomBox = boxObjects[Math.floor(Math.random()*boxObjects.length)];
-    const batch = [{id:randomBox.id,qty:3}];
+    const batch = generateOrderBatch(boxObjects);
 
     await simulateSearch(orderWorker,batch.map(b=>b.id),boxObjects);
 

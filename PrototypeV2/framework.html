@@ -64,7 +64,10 @@ function updateHUD(){
 
 let html=`<strong>Runtime:</strong> ${simulationTime.toFixed(1)}s<br><br>`;
 html+=`<strong>Last Delivery:</strong> ${lastDeliverySummary}<br>`;
-html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br><br>`;
+html+=`<strong>Arrival Worker:</strong> ${arrivalWorker.state}<br><br>`;
+
+html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
+html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
 
 boxObjects.forEach(b=>{
 html+=`${b.id}: ${b.count}/${b.capacity}<br>`;
@@ -90,9 +93,10 @@ processOverflow(boxObjects);
 },2000);
 
 setInterval(()=>{
-tickSimulation(0.5);
+tickSimulation(0.1);
+checkReorderTriggers(boxObjects);
 updateHUD();
-},500);
+},100);
 
 
 // ===== Resize =====
