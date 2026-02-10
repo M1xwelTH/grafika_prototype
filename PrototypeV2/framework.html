@@ -1,122 +1,83 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="UTF-8">
-<title>3D Medicine Rack</title>
+    <head>
+        <meta charset="UTF-8">
+        <title>3D Medicine Rack</title>
+        <style>
+            body{
+            margin:0;
+            overflow:hidden;
+            font-family:Arial;
+            }
+            #hud{
+            position:absolute;
+            top:10px;
+            left:10px;
+            background:rgba(255,255,255,0.9);
+            padding:10px;
+            border-radius:6px;
+            font-size:14px;
+            }
+        </style>
+    </head>
 
-<style>
-body{
-margin:0;
-overflow:hidden;
-font-family:Arial;
-}
+    <body>
+        <div id="hud"></div>
+        <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+        <script src="rack.js"></script>
+        <script>
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf2f2f2);
+            const camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,100);
+            camera.position.set(0,6,9);
+            camera.lookAt(0,2.5,0);
+            const renderer = new THREE.WebGLRenderer({antialias:true});
+            renderer.setSize(window.innerWidth,window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            scene.add(new THREE.AmbientLight(0xffffff,0.6));
+            const dirLight=new THREE.DirectionalLight(0xffffff,0.8);
+            dirLight.position.set(5,10,5);
+            scene.add(dirLight);
 
-#hud{
-position:absolute;
-top:10px;
-left:10px;
-background:rgba(255,255,255,0.9);
-padding:10px;
-border-radius:6px;
-font-size:14px;
-}
-</style>
-</head>
+            //Rack
+            const {rackGroup,boxObjects}=createMedicineRack();
+            scene.add(rackGroup);
 
-<body>
+            //Worker visuals
+            createWorkerShadow(scene);
+            createSearchIndicator(scene);
 
-<div id="hud"></div>
+            //HUD
+            function updateHUD(){
+                let html=`<strong>Runtime:</strong> ${simulationTime.toFixed(1)}s<br><br>`;
+                html+=`<strong>Last Delivery:</strong> ${lastDeliverySummary}<br>`;
+                html+=`<strong>Arrival Worker:</strong> ${arrivalWorker.state}<br><br>`;
+                html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
+                html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
+                boxObjects.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });
+                document.getElementById("hud").innerHTML=html;
+            }
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<script src="rack.js"></script>
+            //Sim Loops
+            setInterval(()=>{ processDelivery(boxObjects); updateBoxes(boxObjects); },5000); //Delivery Loop
+            setInterval(()=>{ processOrder(boxObjects); updateBoxes(boxObjects); },7000); //Order Loop
+            setInterval(()=>{ processOverflow(boxObjects); },2000); //Failsafe
+            setInterval(()=>{ tickSimulation(0.1); checkReorderTriggers(boxObjects); updateHUD(); },100); //AvoidRepeat
 
-<script>
+            //Resize
+            window.addEventListener("resize",()=>{
+            camera.aspect=window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth,window.innerHeight);
+            });
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xf2f2f2);
-
-const camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,100);
-camera.position.set(0,6,9);
-camera.lookAt(0,2.5,0);
-
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(window.innerWidth,window.innerHeight);
-document.body.appendChild(renderer.domElement);
-
-scene.add(new THREE.AmbientLight(0xffffff,0.6));
-
-const dirLight=new THREE.DirectionalLight(0xffffff,0.8);
-dirLight.position.set(5,10,5);
-scene.add(dirLight);
-
-
-// ===== Rack =====
-const {rackGroup,boxObjects}=createMedicineRack();
-scene.add(rackGroup);
-
-// Worker visuals
-createWorkerShadow(scene);
-createSearchIndicator(scene);
-
-
-// ================= HUD =================
-function updateHUD(){
-
-let html=`<strong>Runtime:</strong> ${simulationTime.toFixed(1)}s<br><br>`;
-html+=`<strong>Last Delivery:</strong> ${lastDeliverySummary}<br>`;
-html+=`<strong>Arrival Worker:</strong> ${arrivalWorker.state}<br><br>`;
-
-html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
-html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
-
-boxObjects.forEach(b=>{
-html+=`${b.id}: ${b.count}/${b.capacity}<br>`;
-});
-
-document.getElementById("hud").innerHTML=html;
-}
-
-
-// ===== Simulation Loops =====
-setInterval(()=>{
-processDelivery(boxObjects);
-updateBoxes(boxObjects);
-},5000);
-
-setInterval(()=>{
-processOrder(boxObjects);
-updateBoxes(boxObjects);
-},7000);
-
-setInterval(()=>{
-processOverflow(boxObjects);
-},2000);
-
-setInterval(()=>{
-tickSimulation(0.1);
-checkReorderTriggers(boxObjects);
-updateHUD();
-},100);
-
-
-// ===== Resize =====
-window.addEventListener("resize",()=>{
-camera.aspect=window.innerWidth/window.innerHeight;
-camera.updateProjectionMatrix();
-renderer.setSize(window.innerWidth,window.innerHeight);
-});
-
-
-// ===== Animate =====
-function animate(){
-requestAnimationFrame(animate);
-renderer.render(scene,camera);
-}
-
-updateHUD();
-animate();
-
-</script>
-
-</body>
+            //Animating
+            function animate(){
+            requestAnimationFrame(animate);
+            renderer.render(scene,camera);
+            }
+            updateHUD();
+            animate();
+        </script>
+    </body>
 </html>
