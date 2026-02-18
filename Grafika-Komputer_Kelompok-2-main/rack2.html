@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>3D Medicine Rack</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+<div id="inputs" style="position:absolute; top:10px; left:10px; background:#fff; padding:10px;">
+
+    <h3> Current Stock</h3>
+  <label>A1: <input type="number" id="A1" value="0" min="0" max="100"></label><br>
+  <label>A2: <input type="number" id="A2" value="0" min="0" max="100"></label><br>
+  <label>A3: <input type="number" id="A3" value="0" min="0" max="100"></label><br>
+  <label>A4: <input type="number" id="A4" value="0" min="0" max="100"></label><br>
+  <label>B1: <input type="number" id="B1" value="0" min="0" max="100"></label><br>
+  <label>B2: <input type="number" id="B2" value="0" min="0" max="100"></label><br>
+  <label>B3: <input type="number" id="B3" value="0" min="0" max="100"></label><br>
+  <label>B4: <input type="number" id="B4" value="0" min="0" max="100"></label><br>
+  <label>C1: <input type="number" id="C1" value="0" min="0" max="100"></label><br>
+  <label>C2: <input type="number" id="C2" value="0" min="0" max="100"></label><br>
+  <label>C3: <input type="number" id="C3" value="0" min="0" max="100"></label><br>
+  <label>C4: <input type="number" id="C4" value="0" min="0" max="100"></label><br>
+  <label>D1: <input type="number" id="D1" value="0" min="0" max="100"></label><br>
+  <label>D2: <input type="number" id="D2" value="0" min="0" max="100"></label><br>
+  <label>D3: <input type="number" id="D3" value="0" min="0" max="100"></label><br>
+  <label>D4: <input type="number" id="D4" value="0" min="0" max="100"></label><br>
+  <!-- dst untuk semua kotak -->
+  <button onclick="updateAllBoxes()">Update</button>
+</div>
+
+<div id="orderPanel" style="
+position:absolute;
+top:10px;
+right:10px;
+background:#fff;
+padding:12px;
+width:220px;
+font-family:Arial;
+">
+
+<h3>Order Picking</h3>
+
+<label>Lokasi:</label><br>
+<select id="boxSelect"></select><br><br>
+
+<label>Qty:</label><br>
+<input type="number" id="pickQty" value="1" min="1" style="width:60px"><br><br>
+
+<button onclick="addPick()">Tambah</button>
+
+<hr>
+
+<div id="pickList">Belum ada item</div>
+
+<button onclick="submitOrder()">Submit</button>
+
+</div>
+
+
+<script src="rack2.js"></script>
+
+</body>
+</html>

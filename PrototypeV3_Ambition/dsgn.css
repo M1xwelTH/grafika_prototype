@@ -2,11 +2,17 @@ body
 {
     background-color: blue;
 }
-canvas
+.glcanvas
 {
     background-color: black;
     width: 1000px;
     height: 600px;
+}
+.canvas2
+{
+    background-color: black;
+    width:500px;
+    height:300px;
 }
 .titular
 {
@@ -18,4 +24,25 @@ canvas
 a
 {
     color:white;
+}
+#coordsDisp
+{
+    color: white;
+    font-family: monospace;
+    margin-top: 10px;
+}
+#gridOverlay
+{
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    font-family: monospace;
+    font-size: 11px;
+    color: white;
+}
+.gridLabel
+{
+    position: absolute;
+    transform: translate(3px, 12px);
 }

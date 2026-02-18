@@ -1,0 +1,2 @@
+# Grafika-Komputer_Kelompok-2
+TUGAS KELOMPOK 2 GRAFIKA KOMPUTER

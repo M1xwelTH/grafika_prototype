@@ -4,25 +4,77 @@
         <meta charset="UTF-8">
         <title>3D Medicine Rack</title>
         <style>
-            body{
-            margin:0;
-            overflow:hidden;
-            font-family:Arial;
+            body
+            {
+                margin:0;
+                overflow:hidden;
+                font-family:Arial;
             }
-            #hud{
-            position:absolute;
-            top:10px;
-            left:10px;
-            background:rgba(255,255,255,0.9);
-            padding:10px;
-            border-radius:6px;
-            font-size:14px;
+            #toggleHUD
+            {
+                padding:6px 10px;
+                border:none;
+                border-radius:6px;
+                background:#444;
+                color:white;
+                cursor:pointer;
+            }
+            #buttonTog
+            {
+                position:absolute;
+                top:10px;
+                left:10px;
+            }
+            #buttonTog:hover
+            {
+                opacity:0.8;
+            }
+            #hud
+            {
+                position:absolute;
+                top:50px;
+                left:10px;
+                background:rgba(255,255,255,0.9);
+                padding:10px;
+                border-radius:6px;
+                font-size:14px;
+            }
+            #manualPnl
+            {
+                position:absolute;
+                top:10px;
+                right:10px;
+                width:220px;
+                max-height:90vh;
+                background:rgba(255,255,255,0.9);
+                padding:10px;
+                border-radius:6px;
+                overflow-y:auto; /* allows scrolling */
+                font-size:14px;
+            }
+            #mt
+            {
+                text-align:center;
+                font-size:medium;
             }
         </style>
     </head>
-
     <body>
+        <div id="buttonTog"><button id="toggle">Toggle HUD</button></div>
         <div id="hud"></div>
+        <div id="manualPnl">
+            <mt id="mt">Place Arrival/Customer Order
+                <label>Lokasi:</label><br>
+                <select id="boxSelect"></select><br><br>
+                <label>Qty:</label><br>
+                <input type="number" id="pickQty" value="1" min="1" style="width:60px"><br><br>
+                <button onclick="addPick()">Tambah</button>
+            </mt>
+            <!-- Place them here -->
+        </div>
+        <div id="pickList">Belum ada item</div>
+        <button onclick="submitOrder()">Submit</button>
+        </div>
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
         <script src="rack.js"></script>
         <script>
@@ -38,17 +90,15 @@
             const dirLight=new THREE.DirectionalLight(0xffffff,0.8);
             dirLight.position.set(5,10,5);
             scene.add(dirLight);
-
             //Rack
             const {rackGroup,boxObjects}=createMedicineRack();
             scene.add(rackGroup);
-
             //Worker visuals
             createWorkerShadow(scene);
             createSearchIndicator(scene);
-
             //HUD
-            function updateHUD(){
+            function updateHUD()
+            {
                 let html=`<strong>Runtime:</strong> ${simulationTime.toFixed(1)}s<br><br>`;
                 html+=`<strong>Last Delivery:</strong> ${lastDeliverySummary}<br>`;
                 html+=`<strong>Arrival Worker:</strong> ${arrivalWorker.state}<br><br>`;
@@ -56,14 +106,16 @@
                 html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
                 boxObjects.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });
                 document.getElementById("hud").innerHTML=html;
+                if(!hudVisible) return;
             }
-
+            let hudVisible = true;
+            document.getElementById("toggle").addEventListener("click", () =>
+            { hudVisible = !hudVisible; document.getElementById("hud").style.display = hudVisible ? "block" : "none"; });
             //Sim Loops
             setInterval(()=>{ processDelivery(boxObjects); updateBoxes(boxObjects); },5000); //Delivery Loop
             setInterval(()=>{ processOrder(boxObjects); updateBoxes(boxObjects); },7000); //Order Loop
             setInterval(()=>{ processOverflow(boxObjects); },2000); //Failsafe
             setInterval(()=>{ tickSimulation(0.1); checkReorderTriggers(boxObjects); updateHUD(); },100); //AvoidRepeat
-
             //Resize
             window.addEventListener("resize",()=>{
             camera.aspect=window.innerWidth/window.innerHeight;
@@ -72,10 +124,7 @@
             });
 
             //Animating
-            function animate(){
-            requestAnimationFrame(animate);
-            renderer.render(scene,camera);
-            }
+            function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera);}
             updateHUD();
             animate();
         </script>

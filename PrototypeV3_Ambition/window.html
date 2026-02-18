@@ -6,38 +6,109 @@
     <body>
         <!-- Canvas -->
         <div class="titular"> <a>==TITLE TEXT==</a> </div>
-        <canvas id="glcanvas"></canvas>
+        <div style="display:flex; gap:10px;">
+            <canvas id="glcanvas"></canvas>
+            <canvas id="canvas2"></canvas>
+            <div id="gridOverlay"></div>
+        </div>
+        <div id="coordsDisp"> <a> Coord here </a> </div>
+        <script src="canvasNtrack.js"></script>
         <script src="functions.js"></script>
+        <script src="gridsNwalls.js"></script>
+        <script src="workers.js"></script>
         <script>
             //Shaders
-            const vsSrc = `
+            const vsSrc =
+            `
                 attribute vec2 a_position;
-                void main() { gl_Position = vec4(a_position, 0.0, 1.0); }`;
-            const fsSrc = `
+                attribute vec4 a_color;
+                varying vec4 v_color;
+                void main() { gl_Position = vec4(a_position, 0.0, 1.0); v_color = a_color;}
+            `;
+            const fsSrc =
+            `
                 precision mediump float;
-                uniform vec4 u_color;
-                void main() { gl_FragColor = u_color; }`;
+                varying vec4 v_color;
+                void main() { gl_FragColor = v_color; }
+            `;
+            const vs3D = `
+            attribute vec3 a_position;
+            uniform float u_rotation;
+            void main()
+            {
+                float c = cos(u_rotation);
+                float s = sin(u_rotation);
+                vec3 pos = vec3(
+                    a_position.x * c - a_position.y * s,
+                    a_position.x * s + a_position.y * c,
+                    a_position.z
+                );
+                gl_Position = vec4(pos, 1.0);
+            }
+            `;
+            const fs3D = `
+            precision mediump float;
+            void main() { gl_FragColor = vec4(0.3, 0.8, 1.0, 1.0); }
+            `;
             function makeShader(type, src)
             {
                 const s = gl.createShader(type);
                 gl.shaderSource(s, src);
                 gl.compileShader(s);
+                if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); }
                 return s;
             }
+            //Program
             const program = gl.createProgram();
+            const canvas3D = document.getElementById("glcanvas3D");
+            const gl3D = canvas3D.getContext("webgl");
+            if (!gl3D) { console.warn("Second WebGL not supported"); }
             gl.attachShader(program, makeShader(gl.VERTEX_SHADER, vsSrc));
             gl.attachShader(program, makeShader(gl.FRAGMENT_SHADER, fsSrc));
             gl.linkProgram(program);
             gl.useProgram(program);
             const posLoc = gl.getAttribLocation(program, "a_position");
-            const colorLoc = gl.getUniformLocation(program, "u_color");
+            const colorLoc = gl.getAttribLocation(program, "a_color");
+            //Buffer
             const buffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            const stride = 6 * Float32Array.BYTES_PER_ELEMENT; //position (2) + color (4)
             gl.enableVertexAttribArray(posLoc);
-            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, stride, 0);
+            gl.enableVertexAttribArray(colorLoc);
+            gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, stride, 2 * 4);
+            //WebGL Setup (Viewport)
             gl.clearColor(0, 0, 0, 1);
             gl.viewport(0, 0, canvas.width, canvas.height);
+            // DEMO EXECUTION
+            buildAllWalls();
+            const scenario = generateConnectedScenario(2);
+            // Create Special Points
+            const A = new SpecialPoint(scenario.pointA, [1,1,0,1]);
+            const B = new SpecialPoint(scenario.pointB, [1,0,1,1]);
+            const C = new SpecialPoint(scenario.pointC, [0,1,1,1]);
+            // Spawn Workers
+            workers = scenario.workerStarts
+                .map(start => pathfind(start.id, scenario.pointA.id, true)) // ignore workers
+                .filter(path => path && path.length > 0)
+                .map(path => new Worker(path));
+            let lastTime = performance.now();
+            function gameLoop(now)
+            {
+                const dt = (now - lastTime) / 1000;
+                lastTime = now;
+                workers.forEach(w => w.update(dt));
+                let allWorkerVerts = [];
+                workers.forEach(w => w.render(allWorkerVerts));
+                const specialVerts = [ ...A.render(), ...B.render(), ...C.render() ];
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                const vertices = [ ...renderGrid(), ...renderWalls(), ...specialVerts, ...allWorkerVerts ];
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+                gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 6);
+                requestAnimationFrame(gameLoop);
+            }
+            requestAnimationFrame(gameLoop);
         </script>
+        <link rel="stylesheet" href="dsgn.css">
     </body>
-    <link rel="stylesheet" href="dsgn.css">
 </html>
