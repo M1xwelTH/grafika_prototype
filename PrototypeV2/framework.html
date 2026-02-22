@@ -60,23 +60,24 @@
         </style>
     </head>
     <body>
-        <div id="buttonTog"><button id="toggle">Toggle HUD</button></div>
+        <div id="buttonTog"><button id="toggle">Toggle HUD</button><button id="auto">Start Auto</button></div>
         <div id="hud"></div>
         <div id="manualPnl">
-            <mt id="mt">Place Arrival/Customer Order
+            <div id="mt">Place Arrival/Customer Order
                 <label>Lokasi:</label><br>
-                <select id="boxSelect"></select><br><br>
+                <select id="boxSelect"></select><br>
                 <label>Qty:</label><br>
                 <input type="number" id="pickQty" value="1" min="1" style="width:60px"><br><br>
-                <button onclick="addPick()">Tambah</button>
-            </mt>
-            <!-- Place them here -->
-        </div>
-        <div id="pickList">Belum ada item</div>
-        <button onclick="submitOrder()">Submit</button>
+                <button onclick="addPick2()">Restock</button>
+                <button onclick="addPick()">Consumption</button>
+                <div id="pickList"> ===Belum ada item=== </div>
+                    <button onclick="submitManualBatch()">Submit</button>
+                </div>
+            </div>
         </div>
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
         <script src="rack.js"></script>
+        <script src="functions.js"></script>
         <script>
             const scene = new THREE.Scene();
             scene.background = new THREE.Color(0xf2f2f2);
@@ -92,10 +93,12 @@
             scene.add(dirLight);
             //Rack
             const {rackGroup,boxObjects}=createMedicineRack();
+            window.boxObjects = boxObjects; //Manual Purpose
             scene.add(rackGroup);
             //Worker visuals
             createWorkerShadow(scene);
             createSearchIndicator(scene);
+            populateLocationDropdown(boxObjects);
             //HUD
             function updateHUD()
             {
@@ -104,25 +107,35 @@
                 html+=`<strong>Arrival Worker:</strong> ${arrivalWorker.state}<br><br>`;
                 html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
                 html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
+                html+=`<strong>Overflow Queue:</strong> ${overflowQueue.map(o=>o.id+"("+o.qty+")").join(", ") || "Empty"}<br><br>`;
                 boxObjects.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });
                 document.getElementById("hud").innerHTML=html;
                 if(!hudVisible) return;
             }
+            //Toggles or Buttons
             let hudVisible = true;
             document.getElementById("toggle").addEventListener("click", () =>
             { hudVisible = !hudVisible; document.getElementById("hud").style.display = hudVisible ? "block" : "none"; });
+            let automationRunning = false;
+            document.getElementById("auto").addEventListener("click", () =>
+            {
+                automationRunning = !automationRunning;
+                document.getElementById("auto").textContent = automationRunning ? "Stop Auto" : "Start Auto";
+            });
             //Sim Loops
-            setInterval(()=>{ processDelivery(boxObjects); updateBoxes(boxObjects); },5000); //Delivery Loop
-            setInterval(()=>{ processOrder(boxObjects); updateBoxes(boxObjects); },7000); //Order Loop
-            setInterval(()=>{ processOverflow(boxObjects); },2000); //Failsafe
-            setInterval(()=>{ tickSimulation(0.1); checkReorderTriggers(boxObjects); updateHUD(); },100); //AvoidRepeat
+            setInterval(()=>{ if(automationRunning) processDelivery(boxObjects); updateBoxes(boxObjects); },5000); //Delivery Loop
+            setInterval(()=>{ if(automationRunning) processOrder(boxObjects); updateBoxes(boxObjects); },7000); //Order Loop
+            setInterval(()=>{ checkReorderTriggers(boxObjects); },100); //Failsafe1 checker
+            setInterval(()=>{ processSupplierQueue(); },3000); //Failsafe1: Emergency restock
+            setInterval(()=>{ if(automationRunning) processOverflow(boxObjects); },2000); //Failsafe2: Too much stock
+            //setInterval(()=>{ tickSimulation(0.1); },100); //Simulation Tick Show (Debug Purp), comment to end
+            setInterval(()=>{ updateHUD(); },100); //HUD Update
             //Resize
             window.addEventListener("resize",()=>{
             camera.aspect=window.innerWidth/window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth,window.innerHeight);
             });
-
             //Animating
             function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera);}
             updateHUD();

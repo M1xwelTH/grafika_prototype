@@ -1,14 +1,11 @@
-// ===Functions Below=== \\
+//Rack and worker related
+/* 
+Includes: Rack Layout, Dual Worker System, Visualization, Traversal and Worker Search Function, Initialization
+*/
 
 //Rack Layout
 const LEVEL_IDS = ["A","B","C","D"];
 const BOX_COLUMNS = 4;
-
-//Sim State
-let simulationTime = 0;
-let lastDeliverySummary = "None";
-let lastOrderSummary = "None";
-const overflowQueue = [];
 
 //Worker System
 let rackOccupied = false;
@@ -26,13 +23,10 @@ const orderWorker =
     busy:false,
     state:"Idle"
 };
-let workerShadow = null;
-let searchIndicator = null;
-
-//Delay Helper
-function delay(ms){ return new Promise(res=>setTimeout(res,ms)); }
 
 //Visual Helpers
+let workerShadow = null;
+let searchIndicator = null;
 function createWorkerShadow(scene)
 {
     const geo = new THREE.CylinderGeometry(0.6,0.6,0.05,20);
@@ -42,7 +36,6 @@ function createWorkerShadow(scene)
     workerShadow.visible = false;
     scene.add(workerShadow);
 }
-
 function createSearchIndicator(scene)
 {
     const geo = new THREE.SphereGeometry(0.08,12,12);
@@ -51,20 +44,16 @@ function createSearchIndicator(scene)
     searchIndicator.visible = false;
     scene.add(searchIndicator);
 }
-
 function setBoxTempColor(box, colorHex)
 {
-    // Save original color if not already saved
+    //Save original color if not already saved
     if(!box._originalColor){ box._originalColor = box.mesh.material.color.clone(); }
     box.mesh.material.color.set(colorHex);
 }
-
 function restoreBoxColor(box)
 {
-    if(box._originalColor){
-        box.mesh.material.color.copy(box._originalColor);
-        box._originalColor = null;
-    }
+    if(box._originalColor)
+    { box.mesh.material.color.copy(box._originalColor); box._originalColor = null; }
 }
 
 //Gradient Color
@@ -99,7 +88,7 @@ async function simulateSearch(worker,targetIDs,boxObjects)
     worker.state = "Searching";
     workerShadow.visible = true;
     const traversal = getTraversalOrder(boxObjects);
-    // Tracks where worker currently is
+    //Tracks where worker currently is
     let currentIndex = 0;
     for(const targetID of targetIDs){
         let found = false;
@@ -109,12 +98,9 @@ async function simulateSearch(worker,targetIDs,boxObjects)
             worker.state = `Searching ${box.id}`;
             searchIndicator.visible = true;
             searchIndicator.position.copy(box.mesh.position);
-            // SEARCH WHITE
-            setBoxTempColor(box,0xffffff);
+            setBoxTempColor(box,0xffffff); //Color white for search
             await delay(SEARCH_DELAY);
-            // Not correct box
-            if(box.id !== targetID){ restoreBoxColor(box); }
-            // Found correct box
+            if(box.id !== targetID){ restoreBoxColor(box); } //Not yet found, continue search
             if(box.id === targetID)
             {
                 worker.state = `Interacting ${box.id}`;
@@ -123,7 +109,7 @@ async function simulateSearch(worker,targetIDs,boxObjects)
                 restoreBoxColor(box);
                 found = true;
             }
-            // Move forward through rack
+            //Move forward through rack
             currentIndex = (currentIndex + 1) % traversal.length;
             scannedCount++;
         }
@@ -137,108 +123,6 @@ async function simulateSearch(worker,targetIDs,boxObjects)
     worker.state = "Idle";
     rackOccupied = false;
 }
-
-//Restock Functions
-const supplierQueue = [];
-function checkReorderTriggers(boxObjects)
-{
-    boxObjects.forEach(box => {
-        // Only trigger if exactly at threshold
-        if(box.count <= 10)
-        {
-            // Prevent duplicate queue entries
-            const alreadyQueued = supplierQueue.some(item => item.id === box.id);
-            if(!alreadyQueued) {console.log(`[SUPPLIER ORDER] ${box.id} scheduled for +40`); supplierQueue.push({ id: box.id, qty: 40 });}
-        }
-    });
-}
-
-function weightedRandomBox(boxObjects)
-{
-    // Build weight list
-    let weightedList = [];
-    let totalWeight = 0;
-    boxObjects.forEach(box => {
-        const emptiness = 1 - (box.count / box.capacity);
-        // Prevent zero chance completely
-        const weight = Math.max(emptiness, 0.05);
-        weightedList.push({ box: box, weight: weight });
-        totalWeight += weight;
-    });
-    // Roll weighted random
-    let roll = Math.random() * totalWeight;
-    for(const entry of weightedList) { if(roll < entry.weight){ return entry.box; } roll -= entry.weight; }
-    return weightedList[0].box;
-}
-
-function generateDeliveryBatch(boxObjects)
-{
-    // Prioritize supplier queue first
-    if(supplierQueue.length > 0){ const supplierOrder = supplierQueue.shift(); return [{ id: supplierOrder.id, qty: supplierOrder.qty } ]; }
-    // Otherwise do weighted normal delivery
-    const selectedBox = weightedRandomBox(boxObjects);
-    return [{ id: selectedBox.id, qty: 10 }];
-}
-
-async function processDelivery(boxObjects)
-{
-    if(rackOccupied || arrivalWorker.busy) return;
-    const batch = generateDeliveryBatch(boxObjects);
-    await simulateSearch(arrivalWorker,batch.map(b=>b.id),boxObjects);
-    let summary=[];
-    batch.forEach(item=>{
-        const box = boxObjects.find(b=>b.id===item.id);
-        for(let i=0;i<item.qty;i++){ if(box.count < box.capacity) box.count++; else overflowQueue.push({id:box.id}); }
-        summary.push(`${item.qty} ${box.id}`);
-    });
-    lastDeliverySummary = summary.join(", ");
-}
-
-//Order Functions
-function generateOrderBatch(boxObjects)
-{
-    const roll = Math.random() * 100;
-    //Predef Batch 1 (35%)
-    if(roll < 35){ return [{ id: "A1", qty: 10 }, { id: "B3", qty: 5 }]; }
-    //Predef Batch 2 (15%)
-    else if(roll < 50){ return [{ id: "B1", qty: 8 }, { id: "C2", qty: 4 }, { id: "D4", qty: 5 }]; }
-    //Predef Batch 3 (30%)
-    else if(roll < 80){ return [{ id: "C4", qty: 10 }, { id: "D1", qty: 2 }]; }
-    //Random Batch (20%)
-    else
-    {
-        const randomBox = boxObjects[Math.floor(Math.random() * boxObjects.length)];
-        const qty = Math.floor(Math.random() * 10) + 1;
-        return [{ id: randomBox.id, qty: qty }];
-    }
-}
-
-async function processOrder(boxObjects)
-{
-    if(rackOccupied || orderWorker.busy) return;
-    const batch = generateOrderBatch(boxObjects);
-    await simulateSearch(orderWorker,batch.map(b=>b.id),boxObjects);
-    let summary=[];
-    batch.forEach(item=>{
-        const box = boxObjects.find(b=>b.id===item.id);
-        let fulfilled=0;
-        while(fulfilled < item.qty && box.count>0){ box.count--; fulfilled++; }
-        summary.push(`${fulfilled}/${item.qty} ${box.id}`);
-    });
-    lastOrderSummary = summary.join(", ");
-}
-
-//FailSafe Overflow Restock
-function processOverflow(boxObjects)
-{
-    if(!overflowQueue.length) return;
-    const item = overflowQueue.shift();
-    const box = boxObjects.find(b=>b.id===item.id);
-    if(box.count < box.capacity) box.count++;
-}
-
-//Runtime
-function tickSimulation(delta){ simulationTime += delta; }
 
 //InitRack
 function createMedicineRack()
