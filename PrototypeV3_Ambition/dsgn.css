@@ -8,12 +8,12 @@ body
     width: 1000px;
     height: 600px;
 }
-.canvas2
+/*.canvas2
 {
     background-color: black;
     width:500px;
     height:300px;
-}
+}*/
 .titular
 {
     display: flex;

@@ -62,6 +62,7 @@
     <body>
         <div id="buttonTog"><button id="toggle">Toggle HUD</button><button id="auto">Start Auto</button></div>
         <div id="hud"></div>
+        <!-- 
         <div id="manualPnl">
             <div id="mt">Place Arrival/Customer Order
                 <label>Lokasi:</label><br>
@@ -75,6 +76,7 @@
                 </div>
             </div>
         </div>
+        -->
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
         <script src="rack.js"></script>
         <script src="functions.js"></script>
@@ -103,9 +105,9 @@
             function updateHUD()
             {
                 let html=`<strong>Runtime:</strong> ${simulationTime.toFixed(1)}s<br><br>`;
-                html+=`<strong>Last Delivery:</strong> ${lastDeliverySummary}<br>`;
-                html+=`<strong>Arrival Worker:</strong> ${arrivalWorker.state}<br><br>`;
-                html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
+                //html+=`<strong>Last Restock:</strong> ${lastDeliverySummary}<br>`;
+                html+=`<strong>Restock Worker:</strong> ${arrivalWorker.state}<br><br>`;
+                //html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
                 html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
                 html+=`<strong>Overflow Queue:</strong> ${overflowQueue.map(o=>o.id+"("+o.qty+")").join(", ") || "Empty"}<br><br>`;
                 boxObjects.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });

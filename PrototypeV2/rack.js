@@ -15,13 +15,16 @@ const arrivalWorker =
 {
     type:"arrival",
     busy:false,
-    state:"Idle"
+    state:"Idle",
+    lastIndex: 0
 };
+
 const orderWorker =
 {
     type:"order",
     busy:false,
-    state:"Idle"
+    state:"Idle",
+    lastIndex: 0
 };
 
 //Visual Helpers
@@ -89,7 +92,7 @@ async function simulateSearch(worker,targetIDs,boxObjects)
     workerShadow.visible = true;
     const traversal = getTraversalOrder(boxObjects);
     //Tracks where worker currently is
-    let currentIndex = 0;
+    let currentIndex = worker.lastIndex || 0;
     for(const targetID of targetIDs){
         let found = false;
         let scannedCount = 0;
@@ -120,6 +123,7 @@ async function simulateSearch(worker,targetIDs,boxObjects)
     searchIndicator.visible = false;
     workerShadow.visible = false;
     worker.busy = false;
+    worker.lastIndex = currentIndex;
     worker.state = "Idle";
     rackOccupied = false;
 }
@@ -159,7 +163,7 @@ function createMedicineRack()
             const box = new THREE.Mesh(boxGeo,boxMat);
             box.position.set(-1.2+j*0.8,shelf.position.y+0.3,0);
             rackGroup.add(box);
-            // Labeling
+            //Labeling
             const canvas=document.createElement("canvas");
             canvas.width=128;
             canvas.height=64;

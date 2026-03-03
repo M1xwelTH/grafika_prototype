@@ -12,10 +12,10 @@ let lastOrderSummary = "None";
 const overflowQueue = [];
 function delay(ms){ return new Promise(res=>setTimeout(res,ms)); } //Delay Helper
 function tickSimulation(delta){ simulationTime += delta; } //Runtime
-//Manual State
+//Manual State (For Testing)
 let manualBatch = []; // temp list for UI
 
-//Manual Functions
+//Manual Functions (For Testing)
 function populateLocationDropdown(boxObjects)
 {
     const select = document.getElementById("boxSelect");
@@ -191,29 +191,46 @@ async function processSupplierQueue()
 //Order Execution Functions
 async function executeBatch(batch, source)
 {
-    for(const task of batch)
+    if (!batch || batch.length === 0) return;
+    const worker = batch[0].type === "order" ? orderWorker : arrivalWorker;
+    if(worker.busy || rackOccupied) return;
+    worker.busy = true;
+    rackOccupied = true;
+    try
     {
-        const worker = task.type === "order" ? orderWorker : arrivalWorker;
-        if(worker.busy || rackOccupied) return;
-        await simulateSearch(worker, [task.id], boxObjects);
-        const box = boxObjects.find(b => b.id === task.id);
-        if(task.type === "order")
+        const ids = batch.map(task => task.id); //Mapping for batch
+        await simulateSearch(worker, ids, boxObjects);
+        for(const task of batch)
         {
-            let fulfilled = 0;
-            while(fulfilled < task.qty && box.count > 0) { box.count--; fulfilled++; }
-            if(source === "manual") lastOrderSummary = `[MANUAL] ${fulfilled}/${task.qty} ${box.id}`;
-            else lastOrderSummary = `${fulfilled}/${task.qty} ${box.id}`;
-        }
-        else
-        {
-            let space = box.capacity - box.count;
-            let toStore = Math.min(space, task.qty);
-            let overflow = task.qty - toStore;
-            box.count += toStore;
-            if(overflow > 0) overflowQueue.push({ id: box.id, qty: overflow });
-            if(source === "manual") lastDeliverySummary = `[MANUAL] ${task.qty} ${box.id}`;
-            else lastDeliverySummary = `${task.qty} ${box.id}`;
+            const box = boxObjects.find(b => b.id === task.id);
+            if(task.type === "order")
+            {
+                let fulfilled = Math.min(task.qty, box.count);
+                box.count -= fulfilled;
+                /*
+                if(source === "manual") lastOrderSummary = `[MANUAL] ${fulfilled}/${task.qty} ${box.id}`;
+                else lastOrderSummary = `${fulfilled}/${task.qty} ${box.id}`;
+                */
+            }
+            else
+            {
+                let space = box.capacity - box.count;
+                let toStore = Math.min(space, task.qty);
+                let overflow = task.qty - toStore;
+                box.count += toStore;
+                if(overflow > 0) overflowQueue.push({ id: box.id, qty: overflow });
+                /*
+                if(source === "manual") lastDeliverySummary = `[MANUAL] ${task.qty} ${box.id}`;
+                else lastDeliverySummary = `${task.qty} ${box.id}`;
+                */
+            }
         }
         updateBoxes(boxObjects);
+    }
+    finally
+    {
+        worker.busy = false;
+        worker.lastIndex = 0;
+        rackOccupied = false;
     }
 }

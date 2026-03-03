@@ -8,7 +8,7 @@
         <div class="titular"> <a>==TITLE TEXT==</a> </div>
         <div style="display:flex; gap:10px;">
             <canvas id="glcanvas"></canvas>
-            <canvas id="canvas2"></canvas>
+            <!--<canvas id="canvas2"></canvas>-->
             <div id="gridOverlay"></div>
         </div>
         <div id="coordsDisp"> <a> Coord here </a> </div>
@@ -31,6 +31,7 @@
                 varying vec4 v_color;
                 void main() { gl_FragColor = v_color; }
             `;
+            /*
             const vs3D = `
             attribute vec3 a_position;
             uniform float u_rotation;
@@ -58,11 +59,14 @@
                 if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); }
                 return s;
             }
+            */
             //Program
             const program = gl.createProgram();
+            /*
             const canvas3D = document.getElementById("glcanvas3D");
             const gl3D = canvas3D.getContext("webgl");
             if (!gl3D) { console.warn("Second WebGL not supported"); }
+            */
             gl.attachShader(program, makeShader(gl.VERTEX_SHADER, vsSrc));
             gl.attachShader(program, makeShader(gl.FRAGMENT_SHADER, fsSrc));
             gl.linkProgram(program);
