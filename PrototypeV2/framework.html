@@ -82,6 +82,9 @@
         <script src="functions.js"></script>
         <script>
             const scene = new THREE.Scene();
+            const axesHelper1 = new THREE.AxesHelper(5); scene.add(axesHelper1); //WorldCentralPositiveAxis_ShowFunc
+            const axesHelper2 = new THREE.AxesHelper(-5); scene.add(axesHelper2); //WorldCentralNegativeAxis_ShowFunc
+            const gridHelper = new THREE.GridHelper(20, 20); scene.add(gridHelper); //GridFloor_ShowFunc
             scene.background = new THREE.Color(0xf2f2f2);
             const camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,100);
             camera.position.set(0,6,9);
@@ -94,11 +97,19 @@
             dirLight.position.set(5,10,5);
             scene.add(dirLight);
             //Rack
-            const {rackGroup,boxObjects}=createMedicineRack();
-            window.boxObjects = boxObjects; //Manual Purpose
-            scene.add(rackGroup);
+            const racks = [];
+            const rack1 = createMedicineRack(1); rack1.rackGroup.position.set(-6,0,0);
+            const rack2 = createMedicineRack(2); rack2.rackGroup.position.set(0,0,0);
+            const rack3 = createMedicineRack(3); rack3.rackGroup.position.set(6,0,0);
+            scene.add(rack1.rackGroup);
+            scene.add(rack2.rackGroup);
+            scene.add(rack3.rackGroup);
+            racks.push(rack1,rack2,rack3);
+            const allBoxes = racks.flatMap(r => r.boxObjects);
+            window.boxObjects = allBoxes;
             //Worker visuals
             createWorkerShadow(scene);
+            workerShadow = createWorkerModel(scene);
             createSearchIndicator(scene);
             populateLocationDropdown(boxObjects);
             //HUD
@@ -109,8 +120,9 @@
                 html+=`<strong>Restock Worker:</strong> ${arrivalWorker.state}<br><br>`;
                 //html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
                 html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
+                html+=`Masih perlu tambah perpindahan worker bos, hurhurhur<br><br>`;
                 html+=`<strong>Overflow Queue:</strong> ${overflowQueue.map(o=>o.id+"("+o.qty+")").join(", ") || "Empty"}<br><br>`;
-                boxObjects.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });
+                allBoxes.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });
                 document.getElementById("hud").innerHTML=html;
                 if(!hudVisible) return;
             }
@@ -125,11 +137,11 @@
                 document.getElementById("auto").textContent = automationRunning ? "Stop Auto" : "Start Auto";
             });
             //Sim Loops
-            setInterval(()=>{ if(automationRunning) processDelivery(boxObjects); updateBoxes(boxObjects); },5000); //Delivery Loop
-            setInterval(()=>{ if(automationRunning) processOrder(boxObjects); updateBoxes(boxObjects); },7000); //Order Loop
-            setInterval(()=>{ checkReorderTriggers(boxObjects); },100); //Failsafe1 checker
+            setInterval(()=>{ if(automationRunning) processDelivery(allBoxes); updateBoxes(allBoxes); },5000); //Delivery Loop
+            setInterval(()=>{ if(automationRunning) processOrder(allBoxes); updateBoxes(allBoxes); },7000); //Order Loop
+            setInterval(()=>{ checkReorderTriggers(allBoxes); },100); //Failsafe1 checker
             setInterval(()=>{ processSupplierQueue(); },3000); //Failsafe1: Emergency restock
-            setInterval(()=>{ if(automationRunning) processOverflow(boxObjects); },2000); //Failsafe2: Too much stock
+            setInterval(()=>{ if(automationRunning) processOverflow(allBoxes); },2000); //Failsafe2: Too much stock
             //setInterval(()=>{ tickSimulation(0.1); },100); //Simulation Tick Show (Debug Purp), comment to end
             setInterval(()=>{ updateHUD(); },100); //HUD Update
             //Resize

@@ -60,8 +60,11 @@ async function submitManualBatch()
     if(rackOccupied) return;
     manualBatch.sort((a, b) =>
     {
+        const rackA = parseInt(a.id.match(/^\d+/)[0]); //This is said to help with more than single digit int Rack ID
+        const rackB = parseInt(b.id.match(/^\d+/)[0]);
         if(a.type !== b.type) return a.type === "order" ? -1 : 1; //Sort Order first
-        return a.id.localeCompare(b.id); //Sort by ID
+        if(rackA !== rackB) return rackA - rackB; //Sort by Rack ID
+        return a.id.localeCompare(b.id); //Sort by Box ID
     });
     const analysis = analyzeBatch(manualBatch, boxObjects); //Analyze Batch in case meeting FailSafe situations
     if(analysis.willOverflow || analysis.willUnderflow)
@@ -117,9 +120,9 @@ async function processDelivery(boxObjects)
 function generateOrderBatch(boxObjects)
 {
     const roll = Math.random();
-    if(roll < 0.35){ return [{ id: "A1", qty: 10 }, { id: "B3", qty: 5 }]; } //Predef1 (35%)
-    else if(roll < 0.5){ return [{ id: "B1", qty: 8 }, { id: "C2", qty: 4 }, { id: "D4", qty: 5 }]; } //Predef2 (15%)
-    else if(roll < 0.8){ return [{ id: "C4", qty: 10 }, { id: "D1", qty: 2 }]; } //Predef3 (30%)
+    if(roll < 0.35){ return [{ id: "1A1", qty: 10 }, { id: "3B3", qty: 5 }]; } //Predef1 (35%)
+    else if(roll < 0.5){ return [{ id: "1B1", qty: 8 }, { id: "1C2", qty: 4 }, { id: "1D4", qty: 5 }]; } //Predef2 (15%)
+    else if(roll < 0.8){ return [{ id: "2C4", qty: 10 }, { id: "2D1", qty: 2 }]; } //Predef3 (30%)
     //Random Batch (20%)
     else
     {
@@ -189,6 +192,17 @@ async function processSupplierQueue()
 }
 
 //Order Execution Functions
+function groupTasksByRack(batch)
+{
+    const groups = {};
+    batch.forEach(task =>
+    {
+        const rackNumber = parseInt(task.id.match(/^\d+/)[0]);
+        if(!groups[rackNumber]) {groups[rackNumber] = [];}
+        groups[rackNumber].push(task);
+    });
+    return groups;
+}
 async function executeBatch(batch, source)
 {
     if (!batch || batch.length === 0) return;
@@ -198,31 +212,39 @@ async function executeBatch(batch, source)
     rackOccupied = true;
     try
     {
-        const ids = batch.map(task => task.id); //Mapping for batch
-        await simulateSearch(worker, ids, boxObjects);
-        for(const task of batch)
+        const rackGroups = groupTasksByRack(batch);
+        const rackNumbers = Object.keys(rackGroups).sort((a,b)=>a-b);
+        for(const rackNumber of rackNumbers)
         {
-            const box = boxObjects.find(b => b.id === task.id);
-            if(task.type === "order")
+            const tasks = rackGroups[rackNumber];
+            if(worker.currentRack !== Number(rackNumber)) { worker.lastIndex = 0; worker.currentRack = Number(rackNumber); }
+            await simulateRackSearch(worker, rackNumber);
+            const rackBoxes = boxObjects.filter(b => b.rack === Number(rackNumber));
+            const ids = tasks.map(t => t.id); //Mapping for batch
+            await simulateSearch(worker, ids, rackBoxes);
+            for(const task of tasks)
             {
-                let fulfilled = Math.min(task.qty, box.count);
-                box.count -= fulfilled;
-                /*
-                if(source === "manual") lastOrderSummary = `[MANUAL] ${fulfilled}/${task.qty} ${box.id}`;
-                else lastOrderSummary = `${fulfilled}/${task.qty} ${box.id}`;
-                */
-            }
-            else
-            {
-                let space = box.capacity - box.count;
-                let toStore = Math.min(space, task.qty);
-                let overflow = task.qty - toStore;
-                box.count += toStore;
-                if(overflow > 0) overflowQueue.push({ id: box.id, qty: overflow });
-                /*
-                if(source === "manual") lastDeliverySummary = `[MANUAL] ${task.qty} ${box.id}`;
-                else lastDeliverySummary = `${task.qty} ${box.id}`;
-                */
+                const box = boxObjects.find(b => b.id === task.id);
+                if(task.type === "order")
+                {
+                    let fulfilled = Math.min(task.qty, box.count); box.count -= fulfilled;
+                    /*
+                    if(source === "manual") lastOrderSummary = `[MANUAL] ${fulfilled}/${task.qty} ${box.id}`;
+                    else lastOrderSummary = `${fulfilled}/${task.qty} ${box.id}`;
+                    */
+                }
+                else
+                {
+                    let space = box.capacity - box.count;
+                    let toStore = Math.min(space, task.qty);
+                    let overflow = task.qty - toStore;
+                    box.count += toStore;
+                    if(overflow > 0) overflowQueue.push({ id: box.id, qty: overflow });
+                    /*
+                    if(source === "manual") lastDeliverySummary = `[MANUAL] ${task.qty} ${box.id}`;
+                    else lastDeliverySummary = `${task.qty} ${box.id}`;
+                    */
+                }
             }
         }
         updateBoxes(boxObjects);

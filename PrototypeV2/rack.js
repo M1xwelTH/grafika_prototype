@@ -1,6 +1,7 @@
-//Rack and worker related
+//Object related like racks and workers
 /* 
 Includes: Rack Layout, Dual Worker System, Visualization, Traversal and Worker Search Function, Initialization
+For Worker Sprite implemented using existing worker shadow
 */
 
 //Rack Layout
@@ -16,7 +17,8 @@ const arrivalWorker =
     type:"arrival",
     busy:false,
     state:"Idle",
-    lastIndex: 0
+    lastIndex: 0,
+    currentRack:null
 };
 
 const orderWorker =
@@ -24,12 +26,48 @@ const orderWorker =
     type:"order",
     busy:false,
     state:"Idle",
-    lastIndex: 0
+    lastIndex: 0,
+    currentRack:null
 };
 
 //Visual Helpers
 let workerShadow = null;
 let searchIndicator = null;
+function createWorkerModel(scene) //Well, pawn model technically
+{
+    const workerGroup = new THREE.Group();
+    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x3366ff });
+    const headMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
+    //LowerBodyCilinder
+    const bodyGeo = new THREE.CylinderGeometry(1, 1, 4, 24); //diameter = 2, radius = 1
+    const body = new THREE.Mesh(bodyGeo, bodyMaterial);
+    body.position.y = 2; // half of height
+    workerGroup.add(body);
+    //HalfSphere/Ball (Shoulders)
+    const halfSphereGeo = new THREE.SphereGeometry(
+        1,            // radius
+        24,
+        16,
+        0,
+        Math.PI * 2,
+        0,
+        Math.PI / 2   // only top half
+    );
+    const shoulder = new THREE.Mesh(halfSphereGeo, bodyMaterial);
+    //compress height to ~0.5 visually
+    shoulder.scale.y = 0.5;
+    shoulder.position.y = 4;
+    workerGroup.add(shoulder);
+    //Sphere/BallHead
+    const headGeo = new THREE.SphereGeometry(0.75, 24, 24); //diameter = 1.5
+    const head = new THREE.Mesh(headGeo, headMaterial);
+    head.position.y = 4.75;
+    workerGroup.add(head);
+    //Initial position
+    workerGroup.position.set(0, 0, 1.2);
+    scene.add(workerGroup);
+    return workerGroup;
+}
 function createWorkerShadow(scene)
 {
     const geo = new THREE.CylinderGeometry(0.6,0.6,0.05,20);
@@ -82,6 +120,14 @@ function updateBoxes(boxObjects)
 function getTraversalOrder(boxObjects){ return [...boxObjects].sort((a,b)=>a.id.localeCompare(b.id)); }
 
 //Worker Search Simulation Related
+async function simulateRackSearch(worker, rackNumber)
+{
+    console.log(`[RACK SEARCH] Worker moving to Rack ${rackNumber}`);    
+    worker.state = `Moving to Rack ${rackNumber}`;
+    //const targetRack  = parseInt(batch[0].id.match(/^\d+/)[0]);
+    if(worker.currentRack !== rackNumber) { worker.lastIndex = 0; worker.currentRack = rackNumber; }
+    await delay(4000); //Change once Worker Is Fully Operational
+}
 async function simulateSearch(worker,targetIDs,boxObjects)
 {
     const startTime = performance.now();
@@ -100,7 +146,11 @@ async function simulateSearch(worker,targetIDs,boxObjects)
             const box = traversal[currentIndex];
             worker.state = `Searching ${box.id}`;
             searchIndicator.visible = true;
-            searchIndicator.position.copy(box.mesh.position);
+            workerShadow.position.set(
+                box.mesh.position.x,
+                0,
+                box.mesh.position.z + 1.2
+            );
             setBoxTempColor(box,0xffffff); //Color white for search
             await delay(SEARCH_DELAY);
             if(box.id !== targetID){ restoreBoxColor(box); } //Not yet found, continue search
@@ -129,7 +179,7 @@ async function simulateSearch(worker,targetIDs,boxObjects)
 }
 
 //InitRack
-function createMedicineRack()
+function createMedicineRack(rackNumber)
 {
     const rackGroup = new THREE.Group();
     const shelves=[];
@@ -158,7 +208,7 @@ function createMedicineRack()
         rackGroup.add(shelf);
         shelves.push(shelf);
         for(let j=0;j<BOX_COLUMNS;j++){
-            const id = `${LEVEL_IDS[i]}${j+1}`;
+            const id = `${rackNumber}${LEVEL_IDS[i]}${j+1}`;
             const boxMat = new THREE.MeshStandardMaterial({color:0xff0000});
             const box = new THREE.Mesh(boxGeo,boxMat);
             box.position.set(-1.2+j*0.8,shelf.position.y+0.3,0);
@@ -179,7 +229,7 @@ function createMedicineRack()
             const label=new THREE.Mesh( new THREE.PlaneGeometry(0.35,0.18), new THREE.MeshBasicMaterial({map:texture}) );
             label.position.set(0,0,0.31);
             box.add(label);
-            boxObjects.push({ id:id, capacity:100, count:40, mesh:box });
+            boxObjects.push({ id:id, rack:rackNumber, capacity:100, count:40, mesh:box });
         }
     }
     updateBoxes(boxObjects);
