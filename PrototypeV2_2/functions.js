@@ -6,7 +6,7 @@ Don't forget to change things to consumption (order) and restock (delivery and a
 
 
 //Sim State
-let simulationTime = 0;
+export let simulationTime = 0;
 let lastDeliverySummary = "None";
 let lastOrderSummary = "None";
 const overflowQueue = [];
@@ -15,115 +15,8 @@ function tickSimulation(delta){ simulationTime += delta; } //Runtime
 //Manual State (For Testing)
 let manualBatch = []; // temp list for UI
 
-//Camera functions
-let target = { x: 0, y: 0, z: 0 };
-let radius = 10;
-let yaw = 0;
-let pitch = 0;
-function updateCamera(camera) //helper
-{
-    camera.position.x = target.x + radius * Math.cos(pitch) * Math.sin(yaw);
-    camera.position.y = target.y + radius * Math.sin(pitch);
-    camera.position.z = target.z + radius * Math.cos(pitch) * Math.cos(yaw);
-    camera.lookAt(target.x, target.y, target.z);
-}
-function camMovements(camera, renderer)
-{
-    const dom = renderer.domElement;
-    let isDragging = false;
-    let dragButton = null;
-    let previousMousePosition = { x: 0, y: 0 };
-    // Disable right-click menu
-    dom.addEventListener("contextmenu", (e) => e.preventDefault());
-    dom.addEventListener("mousedown", (e) => {
-        isDragging = true;
-        dragButton = e.button; //0 = left, 2 = right
-        previousMousePosition = { x: e.clientX, y: e.clientY };
-    });
-    dom.addEventListener("mouseup", () => {
-        isDragging = false;
-        dragButton = null;
-    });
-    dom.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
-        const deltaMove =
-        {
-            x: e.clientX - previousMousePosition.x,
-            y: e.clientY - previousMousePosition.y
-        };
-        //Panning using left click
-        if (dragButton === 0)
-        {
-            const panSpeed = 0.01;
-            target.x -= deltaMove.x * panSpeed;
-            target.y += deltaMove.y * panSpeed;
-            updateCamera(camera);
-        }
-        //Rotate using right click
-        if (dragButton === 2)
-        {
-            const rotateSpeed = 0.005;
-            yaw -= deltaMove.x * rotateSpeed;
-            pitch -= deltaMove.y * rotateSpeed;
-            pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, pitch));
-            updateCamera(camera);
-        }
-        previousMousePosition = { x: e.clientX, y: e.clientY };
-    });
-    //Zoom (In&Out, yum)
-    dom.addEventListener("wheel", (e) => {
-        const zoomSpeed = 0.01;
-        radius += e.deltaY * zoomSpeed;
-        radius = Math.max(2, radius); //prevent going through target
-        updateCamera(camera);
-    });
-}
-const keys = {};
-window.addEventListener("keydown", (e) => { keys[e.key.toLowerCase()] = true; });
-window.addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
-function moveTarget(camera) //Move centre
-{
-    const moveSpeed = 0.1;
-    //forward vector (camera -> target)
-    let forward = {
-        x: target.x - camera.position.x,
-        y: 0,
-        z: target.z - camera.position.z
-    };
-    //normalize
-    const length = Math.sqrt(forward.x * forward.x + forward.z * forward.z);
-    forward.x /= length;
-    forward.z /= length;
-    //right vector
-    let right = {
-        x: forward.z,
-        z: -forward.x
-    };
-    if (keys["arrowup"] || keys["w"])
-    {
-        target.x += forward.x * moveSpeed;
-        target.z += forward.z * moveSpeed;
-    }
-    if (keys["arrowdown"] || keys["s"])
-    {
-        target.x -= forward.x * moveSpeed;
-        target.z -= forward.z * moveSpeed;
-    }
-    if (keys["arrowright"] || keys["d"])
-    {
-        target.x -= right.x * moveSpeed;
-        target.z -= right.z * moveSpeed;
-    }
-    if (keys["arrowleft"] || keys["a"])
-    {
-        target.x += right.x * moveSpeed;
-        target.z += right.z * moveSpeed;
-    }
-    updateCamera(camera);
-}
-
 //Manual Functions (For Testing)
-function populateLocationDropdown(boxObjects)
+export function populateLocationDropdown(boxObjects)
 {
     const select = document.getElementById("boxSelect");
     if(!select) return;
@@ -274,7 +167,7 @@ function processOverflow(boxObjects)
 //Failsafe Restock Functions
 const supplierQueue = [];
 const pendingSupplier = new Set(); //prevents duplicates
-function checkReorderTriggers(boxObjects)
+export function checkReorderTriggers(boxObjects)
 {
     boxObjects.forEach(box =>
     {

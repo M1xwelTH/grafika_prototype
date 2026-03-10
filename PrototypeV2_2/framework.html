@@ -58,6 +58,15 @@
                 font-size:medium;
             }
         </style>
+        <script type="importmap">
+            {
+            "imports":
+                {
+                    "three": "https://cdn.jsdelivr.net/npm/three@v0.183.2/build/three.module.js",
+                    "three/addons/": "https://cdn.jsdelivr.net/npm/three@v0.183.2/examples/jsm/"
+                }
+            }
+        </script>
     </head>
     <body>
         <div id="buttonTog"><button id="toggle">Toggle HUD</button><button id="auto">Start Auto</button></div>
@@ -77,10 +86,29 @@
             </div>
         </div>
         -->
-        <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
-        <script src="rack.js"></script>
-        <script src="functions.js"></script>
-        <script>
+        <!-- <script src="https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.min.js"></script>
+        <script type="module" src="rack.js"></script>
+        <script type="module" src="functions.js"></script> -->
+        <script type="module">
+            import * as THREE from 'three';
+            import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+            import
+            {
+                createMedicineRack,
+                createWorkerModel,
+                createWorkerShadow,
+                createSearchIndicator,
+                arrivalWorker,
+                orderWorker
+            }
+            from './rack.js';
+            import
+            {
+                simulationTime,
+                populateLocationDropdown,
+                checkReorderTriggers
+            }
+            from './functions.js';
             const scene = new THREE.Scene();
             const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper); //WorldCentralPositiveAxis_ShowFunc
             const gridHelper = new THREE.GridHelper(20, 20); scene.add(gridHelper); //GridFloor_ShowFunc
@@ -91,7 +119,6 @@
             const renderer = new THREE.WebGLRenderer({antialias:true});
             renderer.setSize(window.innerWidth,window.innerHeight);
             document.body.appendChild(renderer.domElement);
-            camMovements(camera, renderer);
             scene.add(new THREE.AmbientLight(0xffffff,0.6));
             const dirLight=new THREE.DirectionalLight(0xffffff,0.8);
             dirLight.position.set(5,10,5);
@@ -109,7 +136,7 @@
             window.boxObjects = allBoxes;
             //Worker visuals
             createWorkerShadow(scene);
-            workerShadow = createWorkerModel(scene);
+            let workerShadow = createWorkerModel(scene);
             createSearchIndicator(scene);
             populateLocationDropdown(boxObjects);
             //HUD
@@ -151,7 +178,7 @@
             renderer.setSize(window.innerWidth,window.innerHeight);
             });
             //Animating
-            function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); moveTarget(camera)}
+            function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera);}
             updateHUD();
             animate();
         </script>
