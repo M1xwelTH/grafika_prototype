@@ -35,16 +35,19 @@ function camMovements(camera, renderer)
     let previousMousePosition = { x: 0, y: 0 };
     // Disable right-click menu
     dom.addEventListener("contextmenu", (e) => e.preventDefault());
-    dom.addEventListener("mousedown", (e) => {
+    dom.addEventListener("mousedown", (e) =>
+    {
         isDragging = true;
         dragButton = e.button; //0 = left, 2 = right
         previousMousePosition = { x: e.clientX, y: e.clientY };
     });
-    dom.addEventListener("mouseup", () => {
+    dom.addEventListener("mouseup", () => 
+    {
         isDragging = false;
         dragButton = null;
     });
-    dom.addEventListener("mousemove", (e) => {
+    dom.addEventListener("mousemove", (e) =>
+    {
         if (!isDragging) return;
         const deltaMove =
         {
@@ -71,7 +74,8 @@ function camMovements(camera, renderer)
         previousMousePosition = { x: e.clientX, y: e.clientY };
     });
     //Zoom (In&Out, yum)
-    dom.addEventListener("wheel", (e) => {
+    dom.addEventListener("wheel", (e) =>
+    {
         const zoomSpeed = 0.01;
         radius += e.deltaY * zoomSpeed;
         radius = Math.max(2, radius); //prevent going through target
@@ -85,7 +89,8 @@ function moveTarget(camera) //Move centre
 {
     const moveSpeed = 0.1;
     //forward vector (camera -> target)
-    let forward = {
+    let forward =
+    {
         x: target.x - camera.position.x,
         y: 0,
         z: target.z - camera.position.z
@@ -95,7 +100,8 @@ function moveTarget(camera) //Move centre
     forward.x /= length;
     forward.z /= length;
     //right vector
-    let right = {
+    let right =
+    {
         x: forward.z,
         z: -forward.x
     };
@@ -128,7 +134,8 @@ function populateLocationDropdown(boxObjects)
     const select = document.getElementById("boxSelect");
     if(!select) return;
     select.innerHTML = "";
-    boxObjects.forEach(box => {
+    boxObjects.forEach(box =>
+        {
         const option = document.createElement("option");
         option.value = box.id;
         option.textContent = box.id;
@@ -196,7 +203,8 @@ function weightedRandomBox(boxObjects)
     // Build weight list
     let weightedList = [];
     let totalWeight = 0;
-    boxObjects.forEach(box => {
+    boxObjects.forEach(box =>
+    {
         const emptiness = 1 - (box.count / box.capacity);
         // Prevent zero chance completely
         const weight = Math.max(emptiness, 0.05);
@@ -218,7 +226,7 @@ function generateDeliveryBatch(boxObjects)
 }
 async function processDelivery(boxObjects)
 {
-    if(rackOccupied || arrivalWorker.busy) return;
+    if(!workerPool.hasFreeWorker()) return;
     const batch = generateDeliveryBatch(boxObjects).map(item => ({ ...item, type: "restock" }));
     await executeBatch(batch, "auto");
 }
@@ -240,7 +248,7 @@ function generateOrderBatch(boxObjects)
 }
 async function processOrder(boxObjects)
 {
-    if(rackOccupied || orderWorker.busy) return;
+    if(!workerPool.hasFreeWorker()) return;
     const batch = generateOrderBatch(boxObjects).map(item => ({ ...item, type: "order" }));
     await executeBatch(batch, "auto");
 }
@@ -291,7 +299,7 @@ function checkReorderTriggers(boxObjects)
 }
 async function processSupplierQueue()
 {
-    if(rackOccupied || arrivalWorker.busy) return;
+    if(!workerPool.hasFreeWorker()) return;
     if(supplierQueue.length === 0) return;
     const task = supplierQueue.shift();
     await executeBatch([task], "auto");
@@ -313,53 +321,65 @@ function groupTasksByRack(batch)
 async function executeBatch(batch, source)
 {
     if (!batch || batch.length === 0) return;
-    const worker = batch[0].type === "order" ? orderWorker : arrivalWorker;
-    if(worker.busy || rackOccupied) return;
+    //Determine the first rack needed to find the best starting worker
+    const firstRack = parseInt(batch[0].id.match(/^\d+/)[0]);
+    const worker = workerPool.getNearestWorker(firstRack);
+    if (!worker) { console.warn("[POOL] No free worker available"); return; }
     worker.busy = true;
-    rackOccupied = true;
     try
     {
-        const rackGroups = groupTasksByRack(batch);
-        const rackNumbers = Object.keys(rackGroups).sort((a,b)=>a-b);
-        for(const rackNumber of rackNumbers)
+        const rackGroups  = groupTasksByRack(batch); //still in functions.js
+        const rackNumbers = Object.keys(rackGroups).sort((a, b) => a - b);
+        for (const rackNumber of rackNumbers)
         {
             const tasks = rackGroups[rackNumber];
-            if(worker.currentRack !== Number(rackNumber)) { worker.lastIndex = 0; worker.currentRack = Number(rackNumber); }
-            await simulateRackSearch(worker, rackNumber);
-            const rackBoxes = boxObjects.filter(b => b.rack === Number(rackNumber));
-            const ids = tasks.map(t => t.id); //Mapping for batch
-            await simulateSearch(worker, ids, rackBoxes);
-            for(const task of tasks)
+            //Lock this rack while a worker is on it
+            if (!workerPool.isRackFree(Number(rackNumber)))
             {
-                const box = boxObjects.find(b => b.id === task.id);
-                if(task.type === "order")
+                //Another worker is already on this rack — wait and retry
+                while (!workerPool.isRackFree(Number(rackNumber)))
                 {
-                    let fulfilled = Math.min(task.qty, box.count); box.count -= fulfilled;
-                    /*
-                    if(source === "manual") lastOrderSummary = `[MANUAL] ${fulfilled}/${task.qty} ${box.id}`;
-                    else lastOrderSummary = `${fulfilled}/${task.qty} ${box.id}`;
-                    */
-                }
-                else
-                {
-                    let space = box.capacity - box.count;
-                    let toStore = Math.min(space, task.qty);
-                    let overflow = task.qty - toStore;
-                    box.count += toStore;
-                    if(overflow > 0) overflowQueue.push({ id: box.id, qty: overflow });
-                    /*
-                    if(source === "manual") lastDeliverySummary = `[MANUAL] ${task.qty} ${box.id}`;
-                    else lastDeliverySummary = `${task.qty} ${box.id}`;
-                    */
+                    console.warn(`[WORKER ${worker.id}] Rack ${rackNumber} busy, waiting...`);
+                    await delay(2000);
+                    if (workerPool.isRackFree(Number(rackNumber)))
+                    {
+                        console.log(`[WORKER ${worker.id}] Rack ${rackNumber} is now free, proceeding...`);
+                        break;
+                    }
                 }
             }
+            workerPool.lockRack(Number(rackNumber));
+            try
+            {
+                //Move worker to the rack (skipped automatically if already there)
+                await worker.moveToRack(Number(rackNumber));
+                //Pull the rack-local box objects for traversal
+                const rackBoxes = boxObjects.filter(b => b.rack === Number(rackNumber));
+                const ids = tasks.map(t => t.id);
+                await worker.searchAndInteract(ids, rackBoxes);
+                //Apply stock changes after the physical interaction is done
+                for (const task of tasks)
+                {
+                    const box = boxObjects.find(b => b.id === task.id);
+                    if (!box) continue;
+                    if (task.type === "order")
+                    {
+                        const fulfilled = Math.min(task.qty, box.count);
+                        box.count -= fulfilled;
+                    }
+                    else //restock
+                    {
+                        const space = box.capacity - box.count;
+                        const toStore = Math.min(space, task.qty);
+                        const overflow = task.qty - toStore;
+                        box.count += toStore;
+                        if (overflow > 0) overflowQueue.push({ id: box.id, qty: overflow });
+                    }
+                }
+                updateBoxes(boxObjects); //refresh gradient colors
+            }
+            finally { workerPool.unlockRack(Number(rackNumber)); }
         }
-        updateBoxes(boxObjects);
     }
-    finally
-    {
-        worker.busy = false;
-        worker.lastIndex = 0;
-        rackOccupied = false;
-    }
+    finally { worker.busy = false; }
 }

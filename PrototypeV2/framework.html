@@ -60,7 +60,11 @@
         </style>
     </head>
     <body>
-        <div id="buttonTog"><button id="toggle">Toggle HUD</button><button id="auto">Start Auto</button></div>
+        <div id="buttonTog">
+            <button id="toggle">Toggle HUD</button>
+            <button id="auto">Start Auto</button>
+            <button id="hitbox">Hitbox Debug</button>
+        </div>
         <div id="hud"></div>
         <!-- 
         <div id="manualPnl">
@@ -79,10 +83,12 @@
         -->
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
         <script src="rack.js"></script>
+        <script src="worker.js"></script>
         <script src="functions.js"></script>
         <script>
             const scene = new THREE.Scene();
-            const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper); //WorldCentralPositiveAxis_ShowFunc
+            const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper);
+            //WorldCentralPositiveAxis_ShowFunc, x is red, y is green, z is blue
             const gridHelper = new THREE.GridHelper(20, 20); scene.add(gridHelper); //GridFloor_ShowFunc
             scene.background = new THREE.Color(0xf2f2f2);
             const camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,100);
@@ -107,19 +113,19 @@
             racks.push(rack1,rack2,rack3);
             const allBoxes = racks.flatMap(r => r.boxObjects);
             window.boxObjects = allBoxes;
-            //Worker visuals
-            createWorkerShadow(scene);
-            workerShadow = createWorkerModel(scene);
-            createSearchIndicator(scene);
             populateLocationDropdown(boxObjects);
+            //Workers
+            /*
+            workerPool = initWorkerPool(scene, 3); //Set worker amount here
+            workerPool.setInitialPositions([{x:-3,y:0,z:5},{x:3,y:0,z:5},{x:0,y:0,z:5}]);
+            */
+            workerPool = initWorkerPool(scene, 2);
+            workerPool.setInitialPositions([{x:0,y:0,z:5}, {x:3,y:0,z:5}]);
             //HUD
             function updateHUD()
             {
                 let html=`<strong>Runtime:</strong> ${simulationTime.toFixed(1)}s<br><br>`;
-                //html+=`<strong>Last Restock:</strong> ${lastDeliverySummary}<br>`;
-                html+=`<strong>Restock Worker:</strong> ${arrivalWorker.state}<br><br>`;
-                //html+=`<strong>Last Order:</strong> ${lastOrderSummary}<br>`;
-                html+=`<strong>Order Worker:</strong> ${orderWorker.state}<br><br>`;
+                html+=`${workerPool.getStatusHTML()}<br><br>`;
                 html+=`Masih perlu tambah perpindahan worker bos, hurhurhur<br><br>`;
                 html+=`<strong>Overflow Queue:</strong> ${overflowQueue.map(o=>o.id+"("+o.qty+")").join(", ") || "Empty"}<br><br>`;
                 allBoxes.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });
@@ -135,6 +141,18 @@
             {
                 automationRunning = !automationRunning;
                 document.getElementById("auto").textContent = automationRunning ? "Stop Auto" : "Start Auto";
+            });
+            let hitboxDebug = false;
+            document.getElementById("hitbox").addEventListener("click", () =>
+            {
+                hitboxDebug = !hitboxDebug;
+                workerPool.toggleHitboxes();
+                racks.forEach(rack =>
+                {
+                    rack.hitbox.visible = hitboxDebug;
+                    rack.interactionArea.visible = hitboxDebug;
+                });
+                document.getElementById("hitbox").textContent = hitboxDebug ? "Hide Hitboxes" : "Hitbox Debug";
             });
             //Sim Loops
             setInterval(()=>{ if(automationRunning) processDelivery(allBoxes); updateBoxes(allBoxes); },5000); //Delivery Loop
