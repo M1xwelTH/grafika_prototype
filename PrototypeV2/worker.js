@@ -327,17 +327,22 @@ class WorkerPool
         return worldPos;
     }
     //Idle Positioning: spread workers so they don't block each other
-    getIdlePosition(workerIndex)
+    getIdlePosition(worker)
     {
-        //Predefined idle zones away from main paths
-        const idleZones = [
-            { x: -25, z: 8 },   //Left staging zone
-            { x: 0, z: 8 },     //Center front
-            { x: 25, z: 8 },    //Right staging zone
-            { x: -25, z: -8 },  //Left back
-            { x: 25, z: -8 }    //Right back
-        ];
-        return idleZones[workerIndex % idleZones.length];
+        //If worker has visited a rack, idle just behind that rack's interaction area
+        if (worker.currentRack !== null)
+        {
+            const rack = racks.find(r => r.boxObjects[0]?.rack === worker.currentRack);
+            if (rack)
+            {
+                const worldPos = new THREE.Vector3();
+                rack.interactionArea.getWorldPosition(worldPos);
+                //Step back 2 units away from the rack (positive Z = toward open floor)
+                return { x: worldPos.x, z: worldPos.z + 2 };
+            }
+        }
+        //Fallback: stay at current position if no rack visited yet
+        return { x: worker.position.x, z: worker.position.z };
     }
     async repositionAllIdle()
     {
@@ -345,9 +350,8 @@ class WorkerPool
         {
             const worker = this.workers[i];
             if (worker.busy) continue;
-            if (!worker._isInAnyInteractionArea()) continue; //Already in a safe spot, don't move
-            //Only move if currently blocking an interaction area
-            const idlePos = this.getIdlePosition(i);
+            if (!worker._isInAnyInteractionArea()) continue;
+            const idlePos = this.getIdlePosition(worker); //pass worker, not index
             await worker.moveToWorldPosition(idlePos.x, idlePos.z);
         }
     }
