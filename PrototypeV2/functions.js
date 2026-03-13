@@ -311,17 +311,29 @@ async function processOutbound(allBoxes)
         worker.busy = true;
         try
         {
-            const outboundPos = getInteractionPos(outboundRack.interactionArea);
-            worker.state = "Going to Outbound";
-            console.log(`[WORKER ${worker.id}] Flow 3: Outbound → Counter`);
-            await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
-            worker.state = "At Outbound";
-            await delay(3000);
-            const counterPos = getInteractionPos(counter.interactionArea);
-            worker.state = "Going to Counter";
-            await worker.moveToWorldPosition(counterPos.x, counterPos.z);
-            worker.state = "At Counter";
-            await delay(5000);
+            while (!workerPool.isAreaFree('outbound')) { await delay(500); }
+            workerPool.lockArea('outbound');
+            try
+            {
+                const outboundPos = getInteractionPos(outboundRack.interactionArea);
+                worker.state = "Going to Outbound";
+                await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
+                worker.state = "At Outbound";
+                await delay(3000);
+            }
+            finally { workerPool.unlockArea('outbound'); }
+
+            while (!workerPool.isAreaFree('counter')) { await delay(500); }
+            workerPool.lockArea('counter');
+            try
+            {
+                const counterPos = getInteractionPos(counter.interactionArea);
+                worker.state = "Going to Counter";
+                await worker.moveToWorldPosition(counterPos.x, counterPos.z);
+                worker.state = "At Counter";
+                await delay(5000);
+            }
+            finally { workerPool.unlockArea('counter'); }
         }
         finally { worker.busy = false; }
         return;
@@ -336,36 +348,51 @@ async function processOutbound(allBoxes)
     {
         preRack: async (worker) =>
         {
-            const startPos = flowType === 'desk'
-                ? getInteractionPos(desk.interactionArea)
-                : getInteractionPos(counter.interactionArea);
-            worker.state = `Going to ${label}`;
-            await worker.moveToWorldPosition(startPos.x, startPos.z);
-            worker.state = `At ${label}`;
-            await delay(5000);
+            const areaKey = flowType === 'desk' ? 'desk' : 'counter';
+            const areaIA  = flowType === 'desk' ? desk.interactionArea : counter.interactionArea;
+            while (!workerPool.isAreaFree(areaKey)) { await delay(500); }
+            workerPool.lockArea(areaKey);
+            try
+            {
+                const startPos = getInteractionPos(areaIA);
+                worker.state = `Going to ${label}`;
+                await worker.moveToWorldPosition(startPos.x, startPos.z);
+                worker.state = `At ${label}`;
+                await delay(5000);
+            }
+            finally { workerPool.unlockArea(areaKey); }
         },
         postRack: async (worker, batch) =>
         {
-            //Staging: nearest interaction area, wait = batch item count * 2s
-            let nearestIAPos = null;
-            let nearestDist = Infinity;
-            for (const ia of staging.interactionAreas)
+            // Wait for nearest free staging slot
+            let stagingSlot = null;
+            while (!stagingSlot)
             {
-                const iaPos = getInteractionPos(ia);
-                const d = Math.hypot(worker.position.x - iaPos.x, worker.position.z - iaPos.z);
-                if (d < nearestDist) { nearestDist = d; nearestIAPos = iaPos; }
+                stagingSlot = workerPool.getNearestFreeStagingIA(worker);
+                if (!stagingSlot) { await delay(500); }
             }
-            worker.state = "Going to Staging";
-            await worker.moveToWorldPosition(nearestIAPos.x, nearestIAPos.z);
-            worker.state = "At Staging";
-            console.log(`[WORKER ${worker.id}] Staging wait: ${batch.length} item(s) × 2s = ${batch.length * 2}s`);
-            await delay(batch.length * 2000);
-            //Outbound
-            const outboundPos = getInteractionPos(outboundRack.interactionArea);
-            worker.state = "Going to Outbound";
-            await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
-            worker.state = "At Outbound";
-            await delay(3000);
+            workerPool.lockArea(stagingSlot.key);
+            try
+            {
+                worker.state = "Going to Staging";
+                await worker.moveToWorldPosition(stagingSlot.pos.x, stagingSlot.pos.z);
+                worker.state = "At Staging";
+                console.log(`[WORKER ${worker.id}] Staging wait: ${batch.length} item(s) × 2s`);
+                await delay(batch.length * 2000);
+            }
+            finally { workerPool.unlockArea(stagingSlot.key); }
+            // Outbound rack
+            while (!workerPool.isAreaFree('outbound')) { await delay(500); }
+            workerPool.lockArea('outbound');
+            try
+            {
+                const outboundPos = getInteractionPos(outboundRack.interactionArea);
+                worker.state = "Going to Outbound";
+                await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
+                worker.state = "At Outbound";
+                await delay(3000);
+            }
+            finally { workerPool.unlockArea('outbound'); }
         }
     });
 }
@@ -452,13 +479,22 @@ async function executeBatch(batch, source, flowContext = null)
         if (flowContext?.preRack) { await flowContext.preRack(worker); }
         else if (batch.some(t => t.type === "restock"))
         {
-            const storagePos = new THREE.Vector3();
-            storageArea.interactionArea.getWorldPosition(storagePos);
+            const storagePos = getInteractionPos(storageArea.interactionArea);
+            // Storage visit with fully-inside zone trigger
             worker.state = "Going to Storage";
-            console.log(`[WORKER ${worker.id}] Heading to storage area`);
-            await worker.moveToWorldPosition(storagePos.x, storagePos.z);
+            const storageWaypoints = getStorageWaypoints(
+                worker.position.x, worker.position.z,
+                storagePos.x, storagePos.z
+            );
+            await worker.followWaypoints(storageWaypoints.slice(0, 3));
+            // Poll until hitbox is fully inside the storage area before starting the timer
+            const storageIAWorldPos = new THREE.Vector3();
+            storageArea.interactionArea.getWorldPosition(storageIAWorldPos);
+            while (!isWorkerFullyInsideArea(worker.position, storageIAWorldPos, 5, 5))
+            { await delay(16); }
             worker.state = "At Storage";
             await delay(3000);
+            await worker.followWaypoints(storageWaypoints.slice(3));
         }
         //Rack loop
         const rackGroups  = groupTasksByRack(batch);
@@ -503,4 +539,18 @@ async function executeBatch(batch, source, flowContext = null)
         if (flowContext?.postRack) { await flowContext.postRack(worker, batch); }
     }
     finally { worker.busy = false; }
+}
+
+//Movement helper
+function getStorageWaypoints(startX, startZ, storageX, storageZ)
+{
+    const DOOR_OUTSIDE = { x: 14.5, z: -2 }; //Main floor side of storage entrance
+    const DOOR_INSIDE  = { x: 17, z: -2 }; //Inside storage room corridor
+    return[
+        { x: DOOR_OUTSIDE.x, z: DOOR_OUTSIDE.z }, //Approach door from main floor
+        { x: DOOR_INSIDE.x,  z: DOOR_INSIDE.z }, //Step inside storage room
+        { x: storageX, z: storageZ }, //Reach storage area
+        { x: DOOR_INSIDE.x, z: DOOR_INSIDE.z  }, //Return to corridor
+        { x: DOOR_OUTSIDE.x, z: DOOR_OUTSIDE.z }, //Exit back to main floor
+    ];
 }

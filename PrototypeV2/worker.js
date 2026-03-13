@@ -4,51 +4,42 @@ const INTERACTION_DELAY = 600;
 let workerShadow = null;
 let searchIndicator = null;
 let debugHitboxVisible = false;
-/*
-let pathWorker = null;
-let pathRequestId = 0;
-const pathRequests = new Map();
- 
-function initPathWorker()
-{
-    pathWorker = new Worker('pathfinder.worker.js');
-    pathWorker.onmessage = (event) =>
-    {
-        const { id, path } = event.data;
-        const resolve = pathRequests.get(id);
-        if (resolve) { resolve(path); pathRequests.delete(id); }
-    };
-    //Crash guard: worker crash unblocks all pending requests with straight-line fallbacks
-    pathWorker.onerror = (err) =>
-    {
-        console.error(`[PATHWORKER] Crashed: ${err.message} (${err.filename}:${err.lineno})`);
-        pathRequests.forEach((resolve) => resolve(null));
-        pathRequests.clear();
-    };
-}
-async function requestPath(startX, startZ, endX, endZ)
-{
-    return new Promise((resolve) =>
-    {
-        const id = ++pathRequestId;
-        //Timeout: if worker stalls >3s, fall back to straight line
-        const timeout = setTimeout(() =>
-        {
-            if (pathRequests.has(id))
-            {
-                console.warn(`[PATHWORKER] Request ${id} timed out — straight-line fallback`);
-                pathRequests.delete(id);
-                resolve(null);
-            }
-        }, 3000);
-        pathRequests.set(id, (path) => { clearTimeout(timeout); resolve(path); });
-        pathWorker.postMessage({ type: 'findPath', data: { id, startX, startZ, endX, endZ } });
-    });
-}
-*/ 
 
-//Set-up, please change depending on where this is
-const RACK_WORLD_X = { 1: -6, 2: 0, 3: 6 }; //rack1 at x=-6, rack2 at x=0, rack3 at x=6
+//Collision <simple>
+const WORKER_HALF_X = 1.0;
+const WORKER_HALF_Z = 1.0;
+function isColliding(x, z)
+{
+    if (!window.obstacles) return false;
+    for (const obs of window.obstacles)
+    {
+        if (Math.abs(x - obs.cx) < WORKER_HALF_X + obs.halfX &&
+            Math.abs(z - obs.cz) < WORKER_HALF_Z + obs.halfZ)
+            return true;
+    }
+    return false;
+}
+function isCollidingWithWorkers(x, z, selfId)
+{
+    const WORKER_HALF_X = 1.0;
+    const WORKER_HALF_Z = 1.0;
+    for (const other of workerPool.workers)
+    {
+        if (other.id === selfId) continue; //skip self
+        if (!other.position) continue; //skip uninitialized
+        if (!other.model.visible) continue; //skip hidden workers
+        if (Math.abs(x - other.position.x) < WORKER_HALF_X * 2 && Math.abs(z - other.position.z) < WORKER_HALF_Z * 2)
+        { return true; }
+    }
+    return false;
+}
+
+//Storage Area handling
+function isWorkerFullyInsideArea(workerPos, areaWorldPos, areaHalfX, areaHalfZ)
+{
+    return Math.abs(workerPos.x - areaWorldPos.x) < areaHalfX - WORKER_HALF_X &&
+           Math.abs(workerPos.z - areaWorldPos.z) < areaHalfZ - WORKER_HALF_Z;
+}
  
 //Traversal Order
 function getTraversalOrder(boxObjects){ return [...boxObjects].sort((a,b)=>a.id.localeCompare(b.id)); }
@@ -143,8 +134,7 @@ class SimulationWorker
         this.indicator.visible = false;
         this.hitbox.visible = false; //Hide when worker despawns
     }
- 
-    //How many racks away is this worker from a target rack? Workers that have never moved default to rack 2 (center)
+    //How many racks away is this worker from a target rack? Workers that have never moved default to rack 2 (placeholder)
     distanceTo(rackNumber)
     {
         const from = this.currentRack ?? 2;
@@ -153,17 +143,15 @@ class SimulationWorker
     //RackMovement Functions
     async moveToRack(rackNumber)
     {
-        //Get interaction area position
         const interactPos = workerPool.getInteractionPosition(rackNumber);
-        if (!interactPos) 
+        if (!interactPos)
         {
             console.warn(`[WORKER ${this.id}] Could not get interaction position for rack ${rackNumber}`);
             return;
         }
-        if (this.currentRack === rackNumber) return; //already there, skip travel
         console.log(`[WORKER ${this.id}] Moving from Rack ${this.currentRack ?? "base"} → Rack ${rackNumber}`);
         this.state = `Moving to Rack ${rackNumber}`;
-        this.lastIndex = 0; //reset search position when changing racks
+        this.lastIndex = 0;
         await this.moveToWorldPosition(interactPos.x, interactPos.z);
         this.currentRack = rackNumber;
     }
@@ -257,10 +245,31 @@ class SimulationWorker
             const step = Math.min(MOVE_SPEED, dist);
             const nx = (dx / dist) * step;
             const nz = (dz / dist) * step;
-            this.model.position.x  += nx; this.model.position.z  += nz;
-            this.shadow.position.x += nx; this.shadow.position.z += nz;
-            this.hitbox.position.x += nx; this.hitbox.position.z += nz;
-            this.position.x += nx; this.position.z += nz;
+            const blockedFull = isColliding(this.position.x + nx, this.position.z + nz)
+                            || isCollidingWithWorkers(this.position.x + nx, this.position.z + nz, this.id);
+            const blockedX    = isColliding(this.position.x + nx, this.position.z)
+                            || isCollidingWithWorkers(this.position.x + nx, this.position.z, this.id);
+            const blockedZ    = isColliding(this.position.x, this.position.z + nz)
+                            || isCollidingWithWorkers(this.position.x, this.position.z + nz, this.id);
+
+            if (!blockedFull)
+            {
+                this.model.position.x += nx; this.model.position.z += nz;
+                this.shadow.position.x += nx; this.shadow.position.z += nz;
+                this.hitbox.position.x += nx; this.hitbox.position.z += nz;
+                this.position.x += nx; this.position.z += nz;
+            }
+            else if (!blockedX)
+            {
+                this.model.position.x += nx; this.shadow.position.x += nx;
+                this.hitbox.position.x += nx; this.position.x += nx;
+            }
+            else if (!blockedZ)
+            {
+                this.model.position.z += nz; this.shadow.position.z += nz;
+                this.hitbox.position.z += nz; this.position.z += nz;
+            }
+            //else: fully blocked this tick, wait for other worker to move
             await delay(16);
         }
         this._showAt(targetX, targetZ);
@@ -280,11 +289,12 @@ class SimulationWorker
 //WorkerPool
 class WorkerPool
 {
-    constructor(scene, count = 2)
+    constructor(scene, count = 2) //2 temp placeholder
     {
         const COLORS = [0x3366ff, 0xff6633, 0x33cc66, 0xcc33ff];
         this.workers = Array.from({ length: count }, (_, i) => new SimulationWorker(i + 1, scene, COLORS[i % COLORS.length]) );
         this.occupiedRacks = new Set(); //rack numbers currently being worked on
+        this.occupiedAreas = new Set(); //same with above but more variable
     }
     // Returns the nearest free worker to a given rack, or null if none available
     getNearestWorker(rackNumber)
@@ -354,6 +364,25 @@ class WorkerPool
             const idlePos = this.getIdlePosition(worker); //pass worker, not index
             await worker.moveToWorldPosition(idlePos.x, idlePos.z);
         }
+    }
+    //Area occupancy, same pattern as rack locks
+    lockArea(key) { this.occupiedAreas.add(key); }
+    unlockArea(key) { this.occupiedAreas.delete(key); }
+    isAreaFree(key) { return !this.occupiedAreas.has(key); }
+    //Nearest free staging InteractionArea, null if all occupied
+    getNearestFreeStagingIA(worker)
+    {
+        let best = null, bestDist = Infinity;
+        staging.interactionAreas.forEach((ia, i) =>
+        {
+            const key = `staging_${i}`;
+            if (!this.isAreaFree(key)) return;
+            const iaPos = new THREE.Vector3();
+            ia.getWorldPosition(iaPos);
+            const d = Math.hypot(worker.position.x - iaPos.x, worker.position.z - iaPos.z);
+            if (d < bestDist) { bestDist = d; best = { key, pos: iaPos }; }
+        });
+        return best;
     }
 }
  

@@ -176,17 +176,42 @@
             window.outboundRack = outboundRack;
             //Initialize Pathfinding - include walls!
             const allWalls = [wall1, wall2, wall3, wall4, wall5, wall6, wall7, wall8, wall9, wall10];
-            /*
-            //Initialize Path Worker (background thread)
-            initPathWorker();
-            initPathfinding(racks, {
-                staging: staging,
-                desk: desk,
-                counter: counter,
-                storage: storageArea,
-                walls: allWalls
+            window.obstacles = [];
+            //Walls — need rotation-aware half-extent swap
+            allWalls.forEach(w => {
+                const pos = new THREE.Vector3();
+                w.hitbox.getWorldPosition(pos);
+                const rotated = Math.abs(w.wallGroup.rotation.y) > 0.1; // is PI/2 rotated?
+                const { halfX, halfZ } = w.hitbox._collisionSize;
+                obstacles.push({ cx: pos.x, cz: pos.z,
+                    halfX: rotated ? halfZ : halfX,
+                    halfZ: rotated ? halfX : halfZ });
             });
-            */
+            //Racks
+            racks.forEach(r => {
+                const pos = new THREE.Vector3();
+                r.hitbox.getWorldPosition(pos);
+                const { halfX, halfZ } = r.hitbox._collisionSize;
+                obstacles.push({ cx: pos.x, cz: pos.z, halfX, halfZ });
+            });
+            //Staging table
+            const stagingPos = new THREE.Vector3();
+            staging.hitbox.getWorldPosition(stagingPos);
+            obstacles.push({ cx: stagingPos.x, cz: stagingPos.z,
+                halfX: staging.hitbox._collisionSize.halfX,
+                halfZ: staging.hitbox._collisionSize.halfZ });
+            //Computer desk
+            const deskPlace = new THREE.Vector3();
+            desk.hitbox.getWorldPosition(deskPlace);
+            obstacles.push({ cx: deskPlace.x, cz: deskPlace.z,
+                halfX: desk.hitbox._collisionSize.halfX,
+                halfZ: desk.hitbox._collisionSize.halfZ });
+            //Counter
+            const counterPlace = new THREE.Vector3();
+            counter.hitbox.getWorldPosition(counterPlace);
+            obstacles.push({ cx: counterPlace.x, cz: counterPlace.z,
+                halfX: counter.hitbox._collisionSize.halfX,
+                halfZ: counter.hitbox._collisionSize.halfZ });
             //HUD
             function updateHUD()
             {
