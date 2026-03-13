@@ -89,7 +89,7 @@ function createMedicineRack(rackNumber)
             const label=new THREE.Mesh( new THREE.PlaneGeometry(0.35,0.18), new THREE.MeshBasicMaterial({map:texture}) );
             label.position.set(0,0,0.31);
             box.add(label);
-            boxObjects.push({ id:id, rack:rackNumber, capacity:100, count:40, mesh:box });
+            boxObjects.push({ id:id, rack:rackNumber, capacity:100, count:40, mesh:box, type: 'medicine' });
             //Set initial value for box above
         }
     }
@@ -118,6 +118,78 @@ function createMedicineRack(rackNumber)
         return interactionArea;
     }
     const hitbox = _buildHitbox(scene);
+    hitbox._collisionSize = { halfX: 2.05, halfZ: 0.55 }; //Store actual collision bounds
+    const interactionArea = _buildInteractionArea(scene);
+    rackGroup.add(hitbox);
+    rackGroup.add(interactionArea);
+    return { rackGroup, shelves, boxObjects, hitbox, interactionArea };
+}
+
+//InitOutboundRack (similar to medicine rack but with differences)
+function createOutboundRack(rackNumber)
+{
+    const rackGroup = new THREE.Group();
+    const shelves = [];
+    const boxObjects = [];
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+    const shelfMat = new THREE.MeshStandardMaterial({ color: 0xcccccc }); //Slightly different shelf color (darker gray)
+    const rackHeight = 5;
+    //POLES
+    const poleGeo = new THREE.BoxGeometry(0.1, rackHeight, 0.1);
+    [
+        [-2, rackHeight / 2, -0.5],
+        [2, rackHeight / 2, -0.5],
+        [-2, rackHeight / 2, 0.5],
+        [2, rackHeight / 2, 0.5]
+    ].forEach(p => {
+        const pole = new THREE.Mesh(poleGeo, frameMat);
+        pole.position.set(...p);
+        rackGroup.add(pole);
+    });
+    //SHELVES+BOXES
+    const shelfGeo = new THREE.BoxGeometry(4, 0.12, 1);
+    const boxGeo = new THREE.BoxGeometry(0.5, 0.4, 0.6);
+    for (let i = 0; i < LEVEL_IDS.length; i++)
+    {
+        const shelf = new THREE.Mesh(shelfGeo, shelfMat);
+        shelf.position.y = 1 + (LEVEL_IDS.length - 1 - i) * 1.2;
+        rackGroup.add(shelf);
+        shelves.push(shelf);
+        for (let j = 0; j < BOX_COLUMNS; j++)
+        {
+            const id = `O${rackNumber}${LEVEL_IDS[i]}${j + 1}`; //Outbound ID format: O{rackNumber}{level}{column}
+            const boxMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            box.position.set(-1.2 + j * 0.8, shelf.position.y + 0.25, 0);
+            rackGroup.add(box);
+            //No labeling (removed canvas/label code)
+            boxObjects.push({ id: id, rack: rackNumber, capacity: 1, count: 0, mesh: box, type: 'outbound' }); //Capacity=1, count=0
+        }
+    }
+    updateBoxes(boxObjects); //Applies gradient color (red since count=0)
+    //Hitbox (same as medicine rack)
+    function _buildHitbox(scene)
+    {
+        const geo = new THREE.BoxGeometry(4.1, 0.05, 1.1);
+        const edges = new THREE.EdgesGeometry(geo);
+        const hitbox = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ffff })); //Cyan
+        hitbox.visible = false;
+        scene.add(hitbox);
+        return hitbox;
+    }
+    //Interaction Area (same as medicine rack)
+    function _buildInteractionArea(scene)
+    {
+        const geo = new THREE.BoxGeometry(2, 0.05, 2);
+        const edges = new THREE.EdgesGeometry(geo);
+        const interactionArea = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ff00 })); //Green
+        interactionArea.position.set(0, 0, 1.55);
+        interactionArea.visible = false;
+        scene.add(interactionArea);
+        return interactionArea;
+    }
+    const hitbox = _buildHitbox(scene);
+    hitbox._collisionSize = { halfX: 2.05, halfZ: 0.55 };
     const interactionArea = _buildInteractionArea(scene);
     rackGroup.add(hitbox);
     rackGroup.add(interactionArea);

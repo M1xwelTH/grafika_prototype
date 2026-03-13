@@ -197,32 +197,80 @@ async function submitManualBatch()
     await executeBatch(batchCopy, "manual");
 }
 
-//Automated Restock Functions
-function weightedRandomBox(boxObjects)
+//Random Batch Generator
+//Determine batch size (1-4 items per batch, weighted toward smaller batches)
+function getRandomBatchSize()
 {
-    // Build weight list
-    let weightedList = [];
-    let totalWeight = 0;
-    boxObjects.forEach(box =>
-    {
-        const emptiness = 1 - (box.count / box.capacity);
-        // Prevent zero chance completely
-        const weight = Math.max(emptiness, 0.05);
-        weightedList.push({ box: box, weight: weight });
-        totalWeight += weight;
-    });
-    // Roll weighted random
-    let roll = Math.random() * totalWeight;
-    for(const entry of weightedList) { if(roll < entry.weight){ return entry.box; } roll -= entry.weight; }
-    return weightedList[0].box;
+    const roll = Math.random();
+    if (roll < 0.4) return 1; //40% single-type item
+    if (roll < 0.75) return 2; //35% two-type items
+    if (roll < 0.9) return 3; //15% three-type items
+    return 4; //10% four-type items
 }
+function generateRandomMultiTypeBatch(boxObjects, batchType = "order")
+{
+    const medicineBoxes = boxObjects.filter(box => box.type === 'medicine');
+    const batchSize = getRandomBatchSize();
+    //Randomly select N unique boxes
+    const shuffled = [...medicineBoxes].sort(() => Math.random() - 0.5);
+    const selectedBoxes = shuffled.slice(0, Math.min(batchSize, medicineBoxes.length));
+    //Generate quantities based on batch type
+    return selectedBoxes.map(box => (
+    {
+        id: box.id,
+        qty: batchType === "order" 
+            ? Math.floor(Math.random() * 12) + 1 //1-12 items
+            : Math.floor(Math.random() * 15) + 5 //5-19 items for restock
+    }));
+}
+function generateWeightedRandomBatch(boxObjects, batchType = "order")
+{
+    const medicineBoxes = boxObjects.filter(box => box.type === 'medicine');
+    const batchSize = getRandomBatchSize();
+    //Create weighted selection pool
+    let candidates = medicineBoxes.map(box =>
+    {
+        let weight;
+        if (batchType === "order") { weight = Math.max(1, 100 - box.count);} // Prefer low inventory
+        else { weight = Math.max(1, box.capacity - box.count);} // Prefer empty space
+        return { box, weight };
+    });
+    const batch = [];
+    const used = new Set();
+    //Pick N unique items with weighted probability
+    for (let i = 0; i < batchSize && candidates.length > 0; i++)
+    {
+        const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+        let roll = Math.random() * totalWeight;
+        for (const candidate of candidates)
+        {
+            if (roll < candidate.weight)
+            {
+                batch.push(
+                {
+                    id: candidate.box.id,
+                    qty: batchType === "order" 
+                        ? Math.floor(Math.random() * 12) + 1
+                        : Math.floor(Math.random() * 15) + 5
+                });
+                used.add(candidate.box.id);
+                candidates = candidates.filter(c => !used.has(c.box.id));
+                break;
+            }
+            roll -= candidate.weight;
+        }
+    }
+    return batch;
+}
+
+//Automated Restock Functions
 function generateDeliveryBatch(boxObjects)
 {
-    // Prioritize supplier queue first
+    //Prioritize supplier queue first
     if(supplierQueue.length > 0){ const supplierOrder = supplierQueue.shift(); return [{ id: supplierOrder.id, qty: supplierOrder.qty } ]; }
-    // Otherwise do weighted normal delivery
-    const selectedBox = weightedRandomBox(boxObjects);
-    return [{ id: selectedBox.id, qty: 10 }];
+    //Otherwise do weighted normal delivery
+    const selectedBox = generateWeightedRandomBatch(boxObjects, "restock");
+    return selectedBox.length > 0 ? selectedBox : [{ id: boxObjects[0].id, qty: 10 }];
 }
 async function processDelivery(boxObjects)
 {
@@ -234,6 +282,8 @@ async function processDelivery(boxObjects)
 //Automated Order Functions
 function generateOrderBatch(boxObjects)
 {
+    /*
+    const medicineBoxes = boxObjects.filter(box => box.type === 'medicine'); //Filter to medicine only
     const roll = Math.random();
     if(roll < 0.35){ return [{ id: "1A1", qty: 10 }, { id: "3B3", qty: 5 }]; } //Predef1 (35%)
     else if(roll < 0.5){ return [{ id: "1B1", qty: 8 }, { id: "1C2", qty: 4 }, { id: "1D4", qty: 5 }]; } //Predef2 (15%)
@@ -241,10 +291,12 @@ function generateOrderBatch(boxObjects)
     //Random Batch (20%)
     else
     {
-        const randomBox = boxObjects[Math.floor(Math.random() * boxObjects.length)];
+        const randomBox = medicineBoxes[Math.floor(Math.random() * medicineBoxes.length)];
         const qty = Math.floor(Math.random() * 10) + 1;
         return [{ id: randomBox.id, qty: qty }];
     }
+    */
+    return generateWeightedRandomBatch(boxObjects, "order");
 }
 async function processOrder(boxObjects)
 {
@@ -284,7 +336,8 @@ const supplierQueue = [];
 const pendingSupplier = new Set(); //prevents duplicates
 function checkReorderTriggers(boxObjects)
 {
-    boxObjects.forEach(box =>
+    const medicineBoxes = boxObjects.filter(box => box.type === 'medicine'); //Filter to medicine only
+    medicineBoxes.forEach(box =>
     {
         if(box.count <= 10) //can be adjusted later, personally thinks 10 is good though
         {
@@ -312,8 +365,10 @@ function groupTasksByRack(batch)
     const groups = {};
     batch.forEach(task =>
     {
-        const rackNumber = parseInt(task.id.match(/^\d+/)[0]);
-        if(!groups[rackNumber]) {groups[rackNumber] = [];}
+        const match = task.id.match(/\d+/); //First number anywhere in the ID, handles "O1A1" too
+        const rackNumber = match ? parseInt(match[0]) : null;
+        if (rackNumber === null) { console.warn(`[BATCH] Could not parse rack from ID: ${task.id}`); return; }
+        if (!groups[rackNumber]) { groups[rackNumber] = []; }
         groups[rackNumber].push(task);
     });
     return groups;
@@ -321,14 +376,25 @@ function groupTasksByRack(batch)
 async function executeBatch(batch, source)
 {
     if (!batch || batch.length === 0) return;
-    //Determine the first rack needed to find the best starting worker
-    const firstRack = parseInt(batch[0].id.match(/^\d+/)[0]);
+    const firstRack = parseInt(batch[0].id.match(/\d+/)[0]);
     const worker = workerPool.getNearestWorker(firstRack);
     if (!worker) { console.warn("[POOL] No free worker available"); return; }
     worker.busy = true;
     try
     {
-        const rackGroups  = groupTasksByRack(batch); //still in functions.js
+        //Delivery flow: visit storage area first before going to any rack
+        if (batch.some(t => t.type === "restock"))
+        {
+            const storagePos = new THREE.Vector3();
+            storageArea.interactionArea.getWorldPosition(storagePos);
+            worker.state = "Going to Storage";
+            console.log(`[WORKER ${worker.id}] Heading to storage area`);
+            await worker.moveToWorldPosition(storagePos.x, storagePos.z);
+            worker.state = "At Storage";
+            console.log(`[WORKER ${worker.id}] Waiting at storage (3s)`);
+            await delay(3000);
+        }
+        const rackGroups  = groupTasksByRack(batch);
         const rackNumbers = Object.keys(rackGroups).sort((a, b) => a - b);
         for (const rackNumber of rackNumbers)
         {
@@ -340,13 +406,9 @@ async function executeBatch(batch, source)
                 while (!workerPool.isRackFree(Number(rackNumber)))
                 {
                     console.warn(`[WORKER ${worker.id}] Rack ${rackNumber} busy, waiting...`);
-                    await delay(2000);
-                    if (workerPool.isRackFree(Number(rackNumber)))
-                    {
-                        console.log(`[WORKER ${worker.id}] Rack ${rackNumber} is now free, proceeding...`);
-                        break;
-                    }
+                    await delay(500); //Shorter poll, only one worker proceeds since lockRack is called immediately on exit
                 }
+                workerPool.lockRack(Number(rackNumber));
             }
             workerPool.lockRack(Number(rackNumber));
             try

@@ -84,12 +84,13 @@
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
         <script src="rack.js"></script>
         <script src="worker.js"></script>
+        <script src="environment.js"></script>
         <script src="functions.js"></script>
         <script>
             const scene = new THREE.Scene();
             const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper);
-            //WorldCentralPositiveAxis_ShowFunc, x is red, y is green, z is blue
-            const gridHelper = new THREE.GridHelper(20, 20); scene.add(gridHelper); //GridFloor_ShowFunc
+            //above is WorldCentralPositiveAxis_ShowFunc, x is red, y is green, z is blue
+            const gridHelper = new THREE.GridHelper(100, 100); scene.add(gridHelper); //GridFloor_ShowFunc
             scene.background = new THREE.Color(0xf2f2f2);
             const camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,100);
             camera.position.set(0,6,9);
@@ -102,25 +103,85 @@
             const dirLight=new THREE.DirectionalLight(0xffffff,0.8);
             dirLight.position.set(5,10,5);
             scene.add(dirLight);
+            //NOTE: TOTAL AREA IS 60x30 (XxZ) from center (aka -30 to 30 and -15 to 15)
+            //however there is wall thickness 0.5 from wall line
+            //X axis walls (1-5)
+            const wall1 = createWall(60,8); const wall2 = createWall(46,8);
+            const wall3 = createWall(4,3.75); const wall4 = createWall(5,8);
+            const wall5 = createWall(2,8); //For door which is x = 3
+            wall1.wallGroup.position.set(0, 0, -15); wall2.wallGroup.position.set(-7, 0, 15);
+            wall3.wallGroup.position.set(18, 0, 15); wall4.wallGroup.position.set(22.5, 0, 15);
+            wall5.wallGroup.position.set(29, 0, 15);
+            scene.add(wall1.wallGroup); scene.add(wall2.wallGroup);
+            scene.add(wall3.wallGroup); scene.add(wall4.wallGroup); scene.add(wall5.wallGroup);
+            //Z axis walls (6-7)
+            const wall6 = createWall(31,8); const wall7 = createWall(31,8); //Add 1 to make edges visible
+            wall6.wallGroup.rotation.y = Math.PI/2; wall7.wallGroup.rotation.y = Math.PI/2;
+            wall6.wallGroup.position.set(-30, 0, 0); wall7.wallGroup.position.set(30, 0, 0);
+            scene.add(wall6.wallGroup); scene.add(wall7.wallGroup);
+            //Storage Area (8-10)
+            const wall8 = createWall(13.5,8); wall8.wallGroup.position.set(23, 0, 0); scene.add(wall8.wallGroup);
+            const wall9 = createWall(12,8); wall9.wallGroup.rotation.y = Math.PI/2;
+            wall9.wallGroup.position.set(16.5, 0, -9.5); scene.add(wall9.wallGroup);
+            const wall10 = createWall(1,8); wall10.wallGroup.rotation.y = Math.PI/2;
+            wall10.wallGroup.position.set(16.5, 0, 0); scene.add(wall10.wallGroup);
             //Rack
             const racks = [];
-            const rack1 = createMedicineRack(1); rack1.rackGroup.position.set(-6,0,0);
-            const rack2 = createMedicineRack(2); rack2.rackGroup.position.set(0,0,0);
-            const rack3 = createMedicineRack(3); rack3.rackGroup.position.set(6,0,0);
+            //Here be medicine rack
+            const rack1 = createMedicineRack(1); rack1.rackGroup.position.set(-27.45,0,-13.95); //start at wall edge + half rack depth
+            const rack2 = createMedicineRack(2); rack2.rackGroup.position.set(-23.35,0,-13.95);
+            const rack3 = createMedicineRack(3); rack3.rackGroup.position.set(-19.25,0,-13.95);
+            const rack4 = createMedicineRack(4); rack4.rackGroup.position.set(-15.15,0,-13.95);
+            const rack5 = createMedicineRack(5); rack5.rackGroup.position.set(-11.05,0,-13.95);
+            const rack6 = createMedicineRack(6); rack6.rackGroup.position.set(-6.95,0,-13.95);
+            const rack7 = createMedicineRack(7); rack7.rackGroup.position.set(-2.85,0,-13.95);
+            const rack8 = createMedicineRack(8); rack8.rackGroup.position.set(1.25,0,-13.95);
             scene.add(rack1.rackGroup);
             scene.add(rack2.rackGroup);
             scene.add(rack3.rackGroup);
-            racks.push(rack1,rack2,rack3);
+            scene.add(rack4.rackGroup);
+            scene.add(rack5.rackGroup);
+            scene.add(rack6.rackGroup);
+            scene.add(rack7.rackGroup);
+            scene.add(rack8.rackGroup);
+            racks.push(rack1,rack2,rack3,rack4,rack5,rack6,rack7,rack8);
+            //Here be Outbound rack
+            const outboundRack = createOutboundRack(1); outboundRack.rackGroup.rotation.y = Math.PI;
+            outboundRack.rackGroup.position.set(9, 0, 13.95); scene.add(outboundRack.rackGroup);
+            racks.push(outboundRack); //So hitbox debug affects it
             const allBoxes = racks.flatMap(r => r.boxObjects);
             window.boxObjects = allBoxes;
             populateLocationDropdown(boxObjects);
             //Workers
-            /*
             workerPool = initWorkerPool(scene, 3); //Set worker amount here
-            workerPool.setInitialPositions([{x:-3,y:0,z:5},{x:3,y:0,z:5},{x:0,y:0,z:5}]);
+            workerPool.setInitialPositions([{x:-3,y:0,z:8},{x:3,y:0,z:8},{x:0,y:0,z:8}]);
+            //Environment
+            const staging = createStagingArea();
+            staging.tableGroup.position.set(0, 0, 0);
+            scene.add(staging.tableGroup);
+            const desk = createComputerDesk(); desk.deskGroup.rotation.y = Math.PI/2;
+            desk.deskGroup.position.set(-28.5,0,13);
+            scene.add(desk.deskGroup);
+            const counter = createCounter();
+            counter.counterGroup.position.set(18, 0, 13.5); //wallPosition-wallThickness/2-counterDepth/2
+            scene.add(counter.counterGroup);
+            const storageArea = createStorageArea();
+            storageArea.storageGroup.position.set(24.5, 0, -9.5); //edges-wallThickness/2
+            scene.add(storageArea.storageGroup);
+            window.storageArea = storageArea;
+            //Initialize Pathfinding - include walls!
+            const allWalls = [wall1, wall2, wall3, wall4, wall5, wall6, wall7, wall8, wall9, wall10];
+            /*
+            //Initialize Path Worker (background thread)
+            initPathWorker();
+            initPathfinding(racks, {
+                staging: staging,
+                desk: desk,
+                counter: counter,
+                storage: storageArea,
+                walls: allWalls
+            });
             */
-            workerPool = initWorkerPool(scene, 2);
-            workerPool.setInitialPositions([{x:0,y:0,z:5}, {x:3,y:0,z:5}]);
             //HUD
             function updateHUD()
             {
@@ -152,13 +213,31 @@
                     rack.hitbox.visible = hitboxDebug;
                     rack.interactionArea.visible = hitboxDebug;
                 });
+                desk.hitbox.visible = hitboxDebug;
+                desk.interactionArea.visible = hitboxDebug;
+                counter.hitbox.visible = hitboxDebug;
+                counter.interactionArea.visible = hitboxDebug;
+                staging.hitbox.visible = hitboxDebug;
+                staging.interactionAreas.forEach(ia => ia.visible = hitboxDebug);
+                storageArea.interactionArea.visible = hitboxDebug; //No hitbox for rug
+                wall1.hitbox.visible = hitboxDebug;
+                wall2.hitbox.visible = hitboxDebug;
+                wall3.hitbox.visible = hitboxDebug;
+                wall4.hitbox.visible = hitboxDebug;
+                wall5.hitbox.visible = hitboxDebug;
+                wall6.hitbox.visible = hitboxDebug;
+                wall7.hitbox.visible = hitboxDebug;
+                wall8.hitbox.visible = hitboxDebug;
+                wall9.hitbox.visible = hitboxDebug;
+                wall10.hitbox.visible = hitboxDebug;
                 document.getElementById("hitbox").textContent = hitboxDebug ? "Hide Hitboxes" : "Hitbox Debug";
             });
             //Sim Loops
             setInterval(()=>{ if(automationRunning) processDelivery(allBoxes); updateBoxes(allBoxes); },5000); //Delivery Loop
             setInterval(()=>{ if(automationRunning) processOrder(allBoxes); updateBoxes(allBoxes); },7000); //Order Loop
-            setInterval(()=>{ checkReorderTriggers(allBoxes); },100); //Failsafe1 checker
-            setInterval(()=>{ processSupplierQueue(); },3000); //Failsafe1: Emergency restock
+            setInterval(async ()=>{ if(automationRunning && workerPool.workers.some(w=>!w.busy)) await workerPool.repositionAllIdle(); },8000);
+            setInterval(()=>{ if(automationRunning) checkReorderTriggers(allBoxes); },100); //Failsafe1 checker
+            setInterval(()=>{ if(automationRunning) processSupplierQueue(); },3000); //Failsafe1: Emergency restock
             setInterval(()=>{ if(automationRunning) processOverflow(allBoxes); },2000); //Failsafe2: Too much stock
             //setInterval(()=>{ tickSimulation(0.1); },100); //Simulation Tick Show (Debug Purp), comment to end
             setInterval(()=>{ updateHUD(); },100); //HUD Update

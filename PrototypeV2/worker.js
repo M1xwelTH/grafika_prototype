@@ -4,15 +4,57 @@ const INTERACTION_DELAY = 600;
 let workerShadow = null;
 let searchIndicator = null;
 let debugHitboxVisible = false;
+/*
+let pathWorker = null;
+let pathRequestId = 0;
+const pathRequests = new Map();
+ 
+function initPathWorker()
+{
+    pathWorker = new Worker('pathfinder.worker.js');
+    pathWorker.onmessage = (event) =>
+    {
+        const { id, path } = event.data;
+        const resolve = pathRequests.get(id);
+        if (resolve) { resolve(path); pathRequests.delete(id); }
+    };
+    //Crash guard: worker crash unblocks all pending requests with straight-line fallbacks
+    pathWorker.onerror = (err) =>
+    {
+        console.error(`[PATHWORKER] Crashed: ${err.message} (${err.filename}:${err.lineno})`);
+        pathRequests.forEach((resolve) => resolve(null));
+        pathRequests.clear();
+    };
+}
+async function requestPath(startX, startZ, endX, endZ)
+{
+    return new Promise((resolve) =>
+    {
+        const id = ++pathRequestId;
+        //Timeout: if worker stalls >3s, fall back to straight line
+        const timeout = setTimeout(() =>
+        {
+            if (pathRequests.has(id))
+            {
+                console.warn(`[PATHWORKER] Request ${id} timed out — straight-line fallback`);
+                pathRequests.delete(id);
+                resolve(null);
+            }
+        }, 3000);
+        pathRequests.set(id, (path) => { clearTimeout(timeout); resolve(path); });
+        pathWorker.postMessage({ type: 'findPath', data: { id, startX, startZ, endX, endZ } });
+    });
+}
+*/ 
 
 //Set-up, please change depending on where this is
 const RACK_WORLD_X = { 1: -6, 2: 0, 3: 6 }; //rack1 at x=-6, rack2 at x=0, rack3 at x=6
-
+ 
 //Traversal Order
 function getTraversalOrder(boxObjects){ return [...boxObjects].sort((a,b)=>a.id.localeCompare(b.id)); }
-
+ 
 //Worker Class
-class Worker
+class SimulationWorker
 {
     constructor(id, scene, color = 0x3366ff)
     {
@@ -26,6 +68,7 @@ class Worker
         this.indicator = this._buildIndicator(scene);
         this.position = null; //Positioning
         this.hitbox = this._buildHitbox(scene);
+        //this.pathCache = new Map(); // {targetKey: path}
     }
     //Visual builders
     _buildModel(scene, color)
@@ -100,7 +143,7 @@ class Worker
         this.indicator.visible = false;
         this.hitbox.visible = false; //Hide when worker despawns
     }
-
+ 
     //How many racks away is this worker from a target rack? Workers that have never moved default to rack 2 (center)
     distanceTo(rackNumber)
     {
@@ -112,17 +155,16 @@ class Worker
     {
         //Get interaction area position
         const interactPos = workerPool.getInteractionPosition(rackNumber);
-        if (interactPos) { this._showAt(interactPos.x, interactPos.z);}  //Position at interaction area
-        else //Fallback to old logic if needed
+        if (!interactPos) 
         {
-            const rackX = RACK_WORLD_X[rackNumber] ?? 0;
-            this._showAt(rackX, 0);
+            console.warn(`[WORKER ${this.id}] Could not get interaction position for rack ${rackNumber}`);
+            return;
         }
-        if (this.currentRack === rackNumber) { this._showAt(interactPos.x, interactPos.z); return}; //already there, skip travel
+        if (this.currentRack === rackNumber) return; //already there, skip travel
         console.log(`[WORKER ${this.id}] Moving from Rack ${this.currentRack ?? "base"} → Rack ${rackNumber}`);
         this.state = `Moving to Rack ${rackNumber}`;
         this.lastIndex = 0; //reset search position when changing racks
-        await delay(4000);  //Travel time
+        await this.moveToWorldPosition(interactPos.x, interactPos.z);
         this.currentRack = rackNumber;
     }
     async searchAndInteract(targetIDs, boxObjects)
@@ -137,13 +179,13 @@ class Worker
             const worldPos = new THREE.Vector3();
             rack.interactionArea.getWorldPosition(worldPos);
             return worldPos.z;
-        })() : 0;  //Fallback to 0 if rack not found
+        })() : 0; //Fallback to 0 if rack not found
         const interactionX = rack ? (() =>
         {
             const worldPos = new THREE.Vector3();
             rack.interactionArea.getWorldPosition(worldPos);
             return worldPos.x;
-        })() : 0;  //Fallback to 0 if rack not found
+        })() : 0; //Fallback to 0 if rack not found
         //getTraversalOrder is defined in rack.js — still shared utility
         const traversal = getTraversalOrder(boxObjects);
         let currentIndex = this.lastIndex;
@@ -181,19 +223,67 @@ class Worker
         const duration = ((performance.now() - startTime) / 1000).toFixed(2);
         console.log(`[WORKER ${this.id}] Search done | ${duration}s`);
         this.indicator.visible = false;
-        this._hide();
+        //this._hide(); //After movement no longer needed
         this.lastIndex = currentIndex; //to not reset search after finding a box
         this.state = "Idle";
     }
+    _isInAnyInteractionArea()
+    {
+        for (const rack of racks)
+        {
+            const worldPos = new THREE.Vector3();
+            rack.interactionArea.getWorldPosition(worldPos);
+            //Interaction area is BoxGeometry(2,0.05,2) → halfX=1, halfZ=1
+            if (Math.abs(this.position.x - worldPos.x) < 1 && Math.abs(this.position.z - worldPos.z) < 1) return true;
+        }
+        return false;
+    }
+    async moveToWorldPosition(targetX, targetZ)
+    {
+        if (!this.position)
+        {
+            console.warn(`[WORKER ${this.id}] moveToWorldPosition called before position set`);
+            return;
+        }
+        const MOVE_SPEED = 0.15;
+        const TOLERANCE  = 0.3;
+        this.state = "Moving";
+        while (true)
+        {
+            const dx = targetX - this.position.x;
+            const dz = targetZ - this.position.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < TOLERANCE) break;
+            const step = Math.min(MOVE_SPEED, dist);
+            const nx = (dx / dist) * step;
+            const nz = (dz / dist) * step;
+            this.model.position.x  += nx; this.model.position.z  += nz;
+            this.shadow.position.x += nx; this.shadow.position.z += nz;
+            this.hitbox.position.x += nx; this.hitbox.position.z += nz;
+            this.position.x += nx; this.position.z += nz;
+            await delay(16);
+        }
+        this._showAt(targetX, targetZ);
+        this.state = "Idle";
+        console.log(`[WORKER ${this.id}] Arrived at (${targetX.toFixed(1)},${targetZ.toFixed(1)})`);
+    }
+    async followWaypoints(waypoints)
+    {
+        for (const waypoint of waypoints)
+        {
+            await this.moveToWorldPosition(waypoint.x, waypoint.z);
+            if (waypoint.pauseMs) await delay(waypoint.pauseMs);
+        }
+    }
 }
-
+ 
 //WorkerPool
 class WorkerPool
 {
     constructor(scene, count = 2)
     {
         const COLORS = [0x3366ff, 0xff6633, 0x33cc66, 0xcc33ff];
-        this.workers = Array.from({ length: count }, (_, i) => new Worker(i + 1, scene, COLORS[i % COLORS.length]) );
+        this.workers = Array.from({ length: count }, (_, i) => new SimulationWorker(i + 1, scene, COLORS[i % COLORS.length]) );
         this.occupiedRacks = new Set(); //rack numbers currently being worked on
     }
     // Returns the nearest free worker to a given rack, or null if none available
@@ -236,8 +326,33 @@ class WorkerPool
         rack.interactionArea.getWorldPosition(worldPos);  // Get world position of interaction area
         return worldPos;
     }
+    //Idle Positioning: spread workers so they don't block each other
+    getIdlePosition(workerIndex)
+    {
+        //Predefined idle zones away from main paths
+        const idleZones = [
+            { x: -25, z: 8 },   //Left staging zone
+            { x: 0, z: 8 },     //Center front
+            { x: 25, z: 8 },    //Right staging zone
+            { x: -25, z: -8 },  //Left back
+            { x: 25, z: -8 }    //Right back
+        ];
+        return idleZones[workerIndex % idleZones.length];
+    }
+    async repositionAllIdle()
+    {
+        for (let i = 0; i < this.workers.length; i++)
+        {
+            const worker = this.workers[i];
+            if (worker.busy) continue;
+            if (!worker._isInAnyInteractionArea()) continue; //Already in a safe spot, don't move
+            //Only move if currently blocking an interaction area
+            const idlePos = this.getIdlePosition(i);
+            await worker.moveToWorldPosition(idlePos.x, idlePos.z);
+        }
+    }
 }
-
+ 
 //Initializer (for call in framework.html after scene)
 let workerPool = null;
 function initWorkerPool(scene, count)
