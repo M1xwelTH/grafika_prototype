@@ -57,6 +57,24 @@
                 text-align:center;
                 font-size:medium;
             }
+            /* #saveDataBtn
+            {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                padding: 10px 16px;
+                font-size: 14px;
+                background-color: #2e86de;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+            }
+
+            #saveDataBtn:hover
+            {
+                background-color: #1b4f72;
+            } */
         </style>
     </head>
     <body>
@@ -64,6 +82,7 @@
             <button id="toggle">Toggle HUD</button>
             <button id="auto">Start Auto</button>
             <button id="hitbox">Hitbox Debug</button>
+            <button id="saveDataBtn">Save Simulation Data</button>
         </div>
         <div id="hud"></div>
         <!-- 
@@ -82,10 +101,12 @@
         </div>
         -->
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+        <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
         <script src="rack.js"></script>
         <script src="worker.js"></script>
         <script src="environment.js"></script>
         <script src="functions.js"></script>
+        <script src="dataCollector.js"></script>
         <script>
             const scene = new THREE.Scene();
             const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper);
@@ -282,6 +303,45 @@
             function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); moveTarget(camera)}
             updateHUD();
             animate();
+
+            // document.getElementById("saveDataBtn").addEventListener("click", () =>
+            // {
+            //     const data = dataCollector.getData();
+            //     console.table(data);
+            // });
+
+            document.getElementById("saveDataBtn").addEventListener("click", () =>
+            {
+                exportSimulationData();
+            });
+
+            function exportSimulationData()
+            {
+                const data = dataCollector.getData();
+
+                if(data.length === 0)
+                {
+                    alert("No simulation data to export.");
+                    return;
+                }
+
+                //Tambah nomor urut
+                const numberedData = data.map((row, index) => ({
+                    No: index + 1,
+                    time: row.time,
+                    event: row.event,
+                    worker: row.worker,
+                    item: row.item,
+                    rack: row.rack
+                }));
+
+                const worksheet = XLSX.utils.json_to_sheet(numberedData);
+
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Simulation Data");
+
+                XLSX.writeFile(workbook, "pharmacy_simulation.xlsx");
+            }
         </script>
     </body>
 </html>
