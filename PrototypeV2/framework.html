@@ -168,7 +168,12 @@
             const storageArea = createStorageArea();
             storageArea.storageGroup.position.set(24.5, 0, -9.5); //edges-wallThickness/2
             scene.add(storageArea.storageGroup);
+            //Initialization of global variables used in functions
             window.storageArea = storageArea;
+            window.desk = desk;
+            window.counter = counter;
+            window.staging = staging;
+            window.outboundRack = outboundRack;
             //Initialize Pathfinding - include walls!
             const allWalls = [wall1, wall2, wall3, wall4, wall5, wall6, wall7, wall8, wall9, wall10];
             /*
@@ -234,7 +239,8 @@
             });
             //Sim Loops
             setInterval(()=>{ if(automationRunning) processDelivery(allBoxes); updateBoxes(allBoxes); },5000); //Delivery Loop
-            setInterval(()=>{ if(automationRunning) processOrder(allBoxes); updateBoxes(allBoxes); },7000); //Order Loop
+            //setInterval(()=>{ if(automationRunning) processOrder(allBoxes); updateBoxes(allBoxes); },7000); //Order Loop
+            setInterval(()=>{ if(automationRunning) processOutbound(allBoxes); },9000); //Outbound Loop
             setInterval(async ()=>{ if(automationRunning && workerPool.workers.some(w=>!w.busy)) await workerPool.repositionAllIdle(); },8000);
             setInterval(()=>{ if(automationRunning) checkReorderTriggers(allBoxes); },100); //Failsafe1 checker
             setInterval(()=>{ if(automationRunning) processSupplierQueue(); },3000); //Failsafe1: Emergency restock

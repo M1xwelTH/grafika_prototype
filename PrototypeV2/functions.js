@@ -279,30 +279,95 @@ async function processDelivery(boxObjects)
     await executeBatch(batch, "auto");
 }
 
+/*
 //Automated Order Functions
-function generateOrderBatch(boxObjects)
-{
-    /*
-    const medicineBoxes = boxObjects.filter(box => box.type === 'medicine'); //Filter to medicine only
-    const roll = Math.random();
-    if(roll < 0.35){ return [{ id: "1A1", qty: 10 }, { id: "3B3", qty: 5 }]; } //Predef1 (35%)
-    else if(roll < 0.5){ return [{ id: "1B1", qty: 8 }, { id: "1C2", qty: 4 }, { id: "1D4", qty: 5 }]; } //Predef2 (15%)
-    else if(roll < 0.8){ return [{ id: "2C4", qty: 10 }, { id: "2D1", qty: 2 }]; } //Predef3 (30%)
-    //Random Batch (20%)
-    else
-    {
-        const randomBox = medicineBoxes[Math.floor(Math.random() * medicineBoxes.length)];
-        const qty = Math.floor(Math.random() * 10) + 1;
-        return [{ id: randomBox.id, qty: qty }];
-    }
-    */
-    return generateWeightedRandomBatch(boxObjects, "order");
-}
+function generateOrderBatch(boxObjects) { return generateWeightedRandomBatch(boxObjects, "order"); }
 async function processOrder(boxObjects)
 {
     if(!workerPool.hasFreeWorker()) return;
     const batch = generateOrderBatch(boxObjects).map(item => ({ ...item, type: "order" }));
     await executeBatch(batch, "auto");
+}
+*/
+
+//Outbound, advanced version of order
+function getInteractionPos(interactionArea) //Outbound Helper: get world position of any single interactionArea mesh
+{
+    const pos = new THREE.Vector3();
+    interactionArea.getWorldPosition(pos);
+    return pos;
+}
+async function processOutbound(allBoxes)
+{
+    if (!workerPool.hasFreeWorker()) return;
+    const roll = Math.random();
+    const flowType = roll < 0.4 ? 'desk' : roll < 0.8 ? 'counter' : 'outbound_to_counter';
+
+    //Flow 3: Outbound (3s) → Counter (5s), no rack visit — handled separately
+    if (flowType === 'outbound_to_counter')
+    {
+        const worker = workerPool.getNearestWorker(1);
+        if (!worker) return;
+        worker.busy = true;
+        try
+        {
+            const outboundPos = getInteractionPos(outboundRack.interactionArea);
+            worker.state = "Going to Outbound";
+            console.log(`[WORKER ${worker.id}] Flow 3: Outbound → Counter`);
+            await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
+            worker.state = "At Outbound";
+            await delay(3000);
+            const counterPos = getInteractionPos(counter.interactionArea);
+            worker.state = "Going to Counter";
+            await worker.moveToWorldPosition(counterPos.x, counterPos.z);
+            worker.state = "At Counter";
+            await delay(5000);
+        }
+        finally { worker.busy = false; }
+        return;
+    }
+
+    //Flows 1 & 2: Desk/Counter (5s) → Rack → Staging (items * 2s) → Outbound (3s)
+    const batch = generateWeightedRandomBatch(allBoxes, "order").map(item => ({ ...item, type: "order" }));
+    if (!batch || batch.length === 0) return;
+    const label = flowType === 'desk' ? 'Desk' : 'Counter';
+    console.log(`[POOL] Flow ${flowType === 'desk' ? 1 : 2}: ${label} → Rack → Staging → Outbound`);
+    await executeBatch(batch, "outbound",
+    {
+        preRack: async (worker) =>
+        {
+            const startPos = flowType === 'desk'
+                ? getInteractionPos(desk.interactionArea)
+                : getInteractionPos(counter.interactionArea);
+            worker.state = `Going to ${label}`;
+            await worker.moveToWorldPosition(startPos.x, startPos.z);
+            worker.state = `At ${label}`;
+            await delay(5000);
+        },
+        postRack: async (worker, batch) =>
+        {
+            //Staging: nearest interaction area, wait = batch item count * 2s
+            let nearestIAPos = null;
+            let nearestDist = Infinity;
+            for (const ia of staging.interactionAreas)
+            {
+                const iaPos = getInteractionPos(ia);
+                const d = Math.hypot(worker.position.x - iaPos.x, worker.position.z - iaPos.z);
+                if (d < nearestDist) { nearestDist = d; nearestIAPos = iaPos; }
+            }
+            worker.state = "Going to Staging";
+            await worker.moveToWorldPosition(nearestIAPos.x, nearestIAPos.z);
+            worker.state = "At Staging";
+            console.log(`[WORKER ${worker.id}] Staging wait: ${batch.length} item(s) × 2s = ${batch.length * 2}s`);
+            await delay(batch.length * 2000);
+            //Outbound
+            const outboundPos = getInteractionPos(outboundRack.interactionArea);
+            worker.state = "Going to Outbound";
+            await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
+            worker.state = "At Outbound";
+            await delay(3000);
+        }
+    });
 }
 
 //Failsafe Checker for Manual
@@ -373,17 +438,19 @@ function groupTasksByRack(batch)
     });
     return groups;
 }
-async function executeBatch(batch, source)
+async function executeBatch(batch, source, flowContext = null)
 {
     if (!batch || batch.length === 0) return;
     const firstRack = parseInt(batch[0].id.match(/\d+/)[0]);
     const worker = workerPool.getNearestWorker(firstRack);
     if (!worker) { console.warn("[POOL] No free worker available"); return; }
-    worker.busy = true;
+    worker.busy = true; 
     try
     {
-        //Delivery flow: visit storage area first before going to any rack
-        if (batch.some(t => t.type === "restock"))
+        //Pre-rack hook: outbound flows pass their desk/counter visit here
+        //Default: delivery flow visits storage area
+        if (flowContext?.preRack) { await flowContext.preRack(worker); }
+        else if (batch.some(t => t.type === "restock"))
         {
             const storagePos = new THREE.Vector3();
             storageArea.interactionArea.getWorldPosition(storagePos);
@@ -391,43 +458,33 @@ async function executeBatch(batch, source)
             console.log(`[WORKER ${worker.id}] Heading to storage area`);
             await worker.moveToWorldPosition(storagePos.x, storagePos.z);
             worker.state = "At Storage";
-            console.log(`[WORKER ${worker.id}] Waiting at storage (3s)`);
             await delay(3000);
         }
+        //Rack loop
         const rackGroups  = groupTasksByRack(batch);
         const rackNumbers = Object.keys(rackGroups).sort((a, b) => a - b);
         for (const rackNumber of rackNumbers)
         {
             const tasks = rackGroups[rackNumber];
-            //Lock this rack while a worker is on it
-            if (!workerPool.isRackFree(Number(rackNumber)))
+            while (!workerPool.isRackFree(Number(rackNumber)))
             {
-                //Another worker is already on this rack — wait and retry
-                while (!workerPool.isRackFree(Number(rackNumber)))
-                {
-                    console.warn(`[WORKER ${worker.id}] Rack ${rackNumber} busy, waiting...`);
-                    await delay(500); //Shorter poll, only one worker proceeds since lockRack is called immediately on exit
-                }
-                workerPool.lockRack(Number(rackNumber));
+                console.warn(`[WORKER ${worker.id}] Rack ${rackNumber} busy, waiting...`);
+                await delay(500);
             }
             workerPool.lockRack(Number(rackNumber));
             try
             {
-                //Move worker to the rack (skipped automatically if already there)
                 await worker.moveToRack(Number(rackNumber));
-                //Pull the rack-local box objects for traversal
-                const rackBoxes = boxObjects.filter(b => b.rack === Number(rackNumber));
+                const rackBoxes = boxObjects.filter(b => b.rack === Number(rackNumber) && b.type === 'medicine');
                 const ids = tasks.map(t => t.id);
                 await worker.searchAndInteract(ids, rackBoxes);
-                //Apply stock changes after the physical interaction is done
                 for (const task of tasks)
                 {
                     const box = boxObjects.find(b => b.id === task.id);
                     if (!box) continue;
                     if (task.type === "order")
                     {
-                        const fulfilled = Math.min(task.qty, box.count);
-                        box.count -= fulfilled;
+                        box.count -= Math.min(task.qty, box.count);
                     }
                     else //restock
                     {
@@ -438,10 +495,12 @@ async function executeBatch(batch, source)
                         if (overflow > 0) overflowQueue.push({ id: box.id, qty: overflow });
                     }
                 }
-                updateBoxes(boxObjects); //refresh gradient colors
+                updateBoxes(boxObjects);
             }
             finally { workerPool.unlockRack(Number(rackNumber)); }
         }
+        //Post-rack hook: outbound flows pass their staging + outbound visit here
+        if (flowContext?.postRack) { await flowContext.postRack(worker, batch); }
     }
     finally { worker.busy = false; }
 }

@@ -173,7 +173,7 @@ class SimulationWorker
         console.log(`[WORKER ${this.id}] Search start | Targets: ${targetIDs.join(", ")}`);
         this.state = "Searching";
         //Get the interaction area's Z for the current rack to stay aligned
-        const rack = racks.find(r => r.boxObjects[0]?.rack === this.currentRack);
+        const rack = racks.find(r => r.boxObjects[0]?.rack === this.currentRack && r.boxObjects[0]?.type === 'medicine');
         const interactionZ = rack ? (() =>
         {
             const worldPos = new THREE.Vector3();
@@ -326,13 +326,13 @@ class WorkerPool
         rack.interactionArea.getWorldPosition(worldPos);  // Get world position of interaction area
         return worldPos;
     }
-    //Idle Positioning: spread workers so they don't block each other
+    //Idle Positioning: spread workers so they don't block each other, still doesn't work LMAO
     getIdlePosition(worker)
     {
         //If worker has visited a rack, idle just behind that rack's interaction area
         if (worker.currentRack !== null)
         {
-            const rack = racks.find(r => r.boxObjects[0]?.rack === worker.currentRack);
+            const rack = racks.find(r => r.boxObjects[0]?.rack === worker.currentRack && r.boxObjects[0]?.type === 'medicine');
             if (rack)
             {
                 const worldPos = new THREE.Vector3();
