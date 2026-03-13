@@ -101,6 +101,7 @@
         </div>
         -->
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+        <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
         <script src="rack.js"></script>
         <script src="worker.js"></script>
         <script src="environment.js"></script>
@@ -278,11 +279,44 @@
             updateHUD();
             animate();
 
+            // document.getElementById("saveDataBtn").addEventListener("click", () =>
+            // {
+            //     const data = dataCollector.getData();
+            //     console.table(data);
+            // });
+
             document.getElementById("saveDataBtn").addEventListener("click", () =>
             {
-                const data = dataCollector.getData();
-                console.table(data);
+                exportSimulationData();
             });
+
+            function exportSimulationData()
+            {
+                const data = dataCollector.getData();
+
+                if(data.length === 0)
+                {
+                    alert("No simulation data to export.");
+                    return;
+                }
+
+                //Tambah nomor urut
+                const numberedData = data.map((row, index) => ({
+                    No: index + 1,
+                    time: row.time,
+                    event: row.event,
+                    worker: row.worker,
+                    item: row.item,
+                    rack: row.rack
+                }));
+
+                const worksheet = XLSX.utils.json_to_sheet(numberedData);
+
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Simulation Data");
+
+                XLSX.writeFile(workbook, "pharmacy_simulation.xlsx");
+            }
         </script>
     </body>
 </html>
