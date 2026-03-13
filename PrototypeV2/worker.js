@@ -191,6 +191,13 @@ class SimulationWorker
         let currentIndex = this.lastIndex;
         for (const targetID of targetIDs)
         {
+            dataCollector.logEvent(
+                "SEARCH",
+                this.id,
+                targetID,
+                this.currentRack
+            );
+
             let found = false;
             let scannedCount = 0;
             while (!found && scannedCount < traversal.length)
@@ -213,6 +220,13 @@ class SimulationWorker
                     restoreBoxColor(box);
                     this._showAt(interactionX, interactionZ); //returns X base
                     found = true;
+
+                    dataCollector.logEvent(
+                        "PICKUP",
+                        this.id,
+                        box.id,
+                        this.currentRack
+                    );  
                 }
                 else { restoreBoxColor(box); }
                 currentIndex = (currentIndex + 1) % traversal.length;
