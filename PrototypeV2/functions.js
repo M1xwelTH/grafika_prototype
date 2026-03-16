@@ -12,6 +12,14 @@ let lastOrderSummary = "None";
 const overflowQueue = [];
 function delay(ms){ return new Promise(res=>setTimeout(res,ms)); } //Delay Helper
 function tickSimulation(delta){ simulationTime += delta; } //Runtime
+const IDLE_SLOTS = //Open spaces for waiting
+[
+    { x: -3, z: 11 }, //worker 1, starting position
+    { x: -18, z: 7 }, //worker 2, mid-left open floor
+    { x: -14, z: 10 }, //worker 3, centre-left open floor
+    { x: 5, z: 12 }, //worker 4, near starting position
+];
+
 //Manual State (For Testing)
 let manualBatch = []; // temp list for UI
 
@@ -302,7 +310,6 @@ async function processOutbound(allBoxes)
     if (!workerPool.hasFreeWorker()) return;
     const roll = Math.random();
     const flowType = roll < 0.4 ? 'desk' : roll < 0.8 ? 'counter' : 'outbound_to_counter';
-
     //Flow 3: Outbound (3s) → Counter (5s), no rack visit — handled separately
     if (flowType === 'outbound_to_counter')
     {
@@ -320,9 +327,11 @@ async function processOutbound(allBoxes)
                 await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
                 worker.state = "At Outbound";
                 await delay(3000);
+                dataCollector.logEvent("retrieval", worker.id, "take medicine pack", []);
+                const idlePos = IDLE_SLOTS[(worker.id - 1) % IDLE_SLOTS.length];
+                await moveAroundStaging(worker, idlePos.x, idlePos.z);
             }
             finally { workerPool.unlockArea('outbound'); }
-
             while (!workerPool.isAreaFree('counter')) { await delay(500); }
             workerPool.lockArea('counter');
             try
@@ -331,7 +340,14 @@ async function processOutbound(allBoxes)
                 worker.state = "Going to Counter";
                 await worker.moveToWorldPosition(counterPos.x, counterPos.z);
                 worker.state = "At Counter";
+                worker._passableAt = performance.now() + 2000;
                 await delay(5000);
+                worker._passableAt = null;
+                dataCollector.logEvent("retrieval", worker.id, "give medicine pack", []);
+                const idlePos = IDLE_SLOTS[(worker.id - 1) % IDLE_SLOTS.length];
+                worker.state = "Returning to Idle";
+                await moveAroundStaging(worker, idlePos.x, idlePos.z);
+                worker.state = "Idle";
             }
             finally { workerPool.unlockArea('counter'); }
         }
@@ -343,9 +359,12 @@ async function processOutbound(allBoxes)
     const batch = generateWeightedRandomBatch(allBoxes, "order").map(item => ({ ...item, type: "order" }));
     if (!batch || batch.length === 0) return;
     const label = flowType === 'desk' ? 'Desk' : 'Counter';
+    const flowLabel = flowType === 'desk' ? 'outflow 1' : 'outflow 2';
+    const batchIds = batch.map(t => t.id);
     console.log(`[POOL] Flow ${flowType === 'desk' ? 1 : 2}: ${label} → Rack → Staging → Outbound`);
     await executeBatch(batch, "outbound",
     {
+        flowLabel: flowLabel,
         preRack: async (worker) =>
         {
             const areaKey = flowType === 'desk' ? 'desk' : 'counter';
@@ -356,9 +375,24 @@ async function processOutbound(allBoxes)
             {
                 const startPos = getInteractionPos(areaIA);
                 worker.state = `Going to ${label}`;
-                await worker.moveToWorldPosition(startPos.x, startPos.z);
+                if (flowType === 'desk')
+                {
+                    //Always approach desk from south — desk collision zone starts at z=10.45
+                    //Step to z=9 at current X, align X to desk IA, then ascend to desk
+                    if (Math.abs(worker.position.z - 9) > 1)
+                    { await moveAroundStaging(worker, worker.position.x, 9); }
+                    await worker.moveToWorldPosition(startPos.x, 9);
+                    await worker.moveToWorldPosition(startPos.x, startPos.z);
+                }
+                else { await worker.moveToWorldPosition(startPos.x, startPos.z); }
                 worker.state = `At ${label}`;
+                worker._passableAt = performance.now() + 2000;
                 await delay(5000);
+                await worker.moveToWorldPosition(12, 8); //pinpoint to guard against wall issue
+                await waitDoorwayExit(worker);
+                worker._passableAt = null;
+                const orderActivity = flowType === 'desk' ? "receiving order online" : "receiving order from counter";
+                dataCollector.logEvent(flowLabel, worker.id, orderActivity, batchIds);
             }
             finally { workerPool.unlockArea(areaKey); }
         },
@@ -375,10 +409,13 @@ async function processOutbound(allBoxes)
             try
             {
                 worker.state = "Going to Staging";
-                await worker.moveToWorldPosition(stagingSlot.pos.x, stagingSlot.pos.z);
+                await moveAroundStaging(worker, stagingSlot.pos.x, stagingSlot.pos.z);
                 worker.state = "At Staging";
-                console.log(`[WORKER ${worker.id}] Staging wait: ${batch.length} item(s) × 2s`);
+                worker._passableAt = performance.now() + 3000; //passable after 3s, shorter since staging is long
+                console.log(`[WORKER ${worker.id}] Staging wait: ${batch.length} item(s) x 2s`);
                 await delay(batch.length * 2000);
+                worker._passableAt = null;
+                dataCollector.logEvent(flowLabel, worker.id, "medicine pack organized", batchIds);
             }
             finally { workerPool.unlockArea(stagingSlot.key); }
             // Outbound rack
@@ -388,9 +425,12 @@ async function processOutbound(allBoxes)
             {
                 const outboundPos = getInteractionPos(outboundRack.interactionArea);
                 worker.state = "Going to Outbound";
-                await worker.moveToWorldPosition(outboundPos.x, outboundPos.z);
+                await moveAroundStaging(worker, outboundPos.x, outboundPos.z);
                 worker.state = "At Outbound";
                 await delay(3000);
+                dataCollector.logEvent(flowLabel, worker.id, "placing pack on outbound", batchIds);
+                const idlePos = IDLE_SLOTS[(worker.id - 1) % IDLE_SLOTS.length];
+                await moveAroundStaging(worker, idlePos.x, idlePos.z);
             }
             finally { workerPool.unlockArea('outbound'); }
         }
@@ -471,7 +511,11 @@ async function executeBatch(batch, source, flowContext = null)
     const firstRack = parseInt(batch[0].id.match(/\d+/)[0]);
     const worker = workerPool.getNearestWorker(firstRack);
     if (!worker) { console.warn("[POOL] No free worker available"); return; }
-    worker.busy = true; 
+    worker.busy = true;
+    //Data Collection
+    const flowLabel = flowContext?.flowLabel ?? (batch.some(t => t.type === "restock") ? "inbound" : "outflow");
+    const batchIds = batch.map(t => t.id);
+    dataCollector.logEvent(flowLabel, worker.id, "flow received", batchIds);
     try
     {
         //Pre-rack hook: outbound flows pass their desk/counter visit here
@@ -480,49 +524,90 @@ async function executeBatch(batch, source, flowContext = null)
         else if (batch.some(t => t.type === "restock"))
         {
             const storagePos = getInteractionPos(storageArea.interactionArea);
-            // Storage visit with fully-inside zone trigger
+            const storageWaypoints = getStorageWaypoints(storagePos.x, storagePos.z);
             worker.state = "Going to Storage";
-            const storageWaypoints = getStorageWaypoints(
-                worker.position.x, worker.position.z,
-                storagePos.x, storagePos.z
-            );
-            await worker.followWaypoints(storageWaypoints.slice(0, 3));
-            // Poll until hitbox is fully inside the storage area before starting the timer
+            if (worker.position.x < -5) //Avoid stuck at staging area
+            {
+                const bypassZ = worker.position.z >= 0 ? 7 : -7;
+                await moveAroundStaging(worker, 0, bypassZ);
+            }
+            await moveAroundStaging(worker, DOOR_WAIT.x, DOOR_WAIT.z);
+            //Now poll — leaving workers still need to fully clear DOOR_OUTSIDE before we proceed
+            const doorwaitStart = simulationTime;
+            await doorwayManager.requestEnter(worker);
+            if (simulationTime - doorwaitStart > 0.3) dataCollector.logEvent(flowLabel, worker.id, "doorway wait done", batchIds);
+            try
+            {
+                //Cross DOOR_OUTSIDE → DOOR_INSIDE — doorway is now confirmed empty
+                await followWaypointsWithTimeout(worker, storageWaypoints.slice(0, 2), 8000);
+            }
+            finally { doorwayManager.finishEntering(); }
+            //Reach storage, do work
+            await worker.followWaypoints(storageWaypoints.slice(2, 3));
             const storageIAWorldPos = new THREE.Vector3();
             storageArea.interactionArea.getWorldPosition(storageIAWorldPos);
             while (!isWorkerFullyInsideArea(worker.position, storageIAWorldPos, 5, 5))
             { await delay(16); }
             worker.state = "At Storage";
             await delay(3000);
-            await worker.followWaypoints(storageWaypoints.slice(3));
+            dataCollector.logEvent(flowLabel, worker.id, "took stocks from storage", batchIds);
+            //Register as leaving, then cross back out
+            doorwayManager.startLeaving();
+            //Waypoints [3] DOOR_INSIDE → [4] DOOR_OUTSIDE
+            await followWaypointsWithTimeout(worker, storageWaypoints.slice(3), 8000);
+            worker._moveDeadline = performance.now() + 6000;
+            await worker.moveToWorldPosition(9, DOOR_OUTSIDE.z - 4); //Waiting point outside, clear doorway
+            worker._moveDeadline = null;
+            doorwayManager.finishLeaving();
         }
         //Rack loop
-        const rackGroups  = groupTasksByRack(batch);
+        const rackGroups = groupTasksByRack(batch);
         const rackNumbers = Object.keys(rackGroups).sort((a, b) => a - b);
         for (const rackNumber of rackNumbers)
         {
             const tasks = rackGroups[rackNumber];
+            // Poll until free — no lock held yet so we don't block ourselves
+            let hadToWait = false;
             while (!workerPool.isRackFree(Number(rackNumber)))
             {
+                hadToWait = true;
+                if (worker.state !== `Waiting Rack ${rackNumber}`)
+                {
+                    //Pick slot by worker ID so workers spread out, not cluster
+                    const slot = IDLE_SLOTS[(worker.id - 1) % IDLE_SLOTS.length];
+                    await moveAroundStaging(worker, slot.x, slot.z);
+                    worker.state = `Waiting Rack ${rackNumber}`;
+                }
                 console.warn(`[WORKER ${worker.id}] Rack ${rackNumber} busy, waiting...`);
                 await delay(500);
             }
+            if (hadToWait) dataCollector.logEvent(flowLabel, worker.id, `rack ${rackNumber} wait done`, batchIds);
+            //Lock immediately when free — before any await that could let another worker in
             workerPool.lockRack(Number(rackNumber));
             try
             {
+                dataCollector.logEvent(flowLabel, worker.id, `arrived rack ${rackNumber}`, batchIds);
                 await worker.moveToRack(Number(rackNumber));
                 const rackBoxes = boxObjects.filter(b => b.rack === Number(rackNumber) && b.type === 'medicine');
                 const ids = tasks.map(t => t.id);
                 await worker.searchAndInteract(ids, rackBoxes);
+                dataCollector.logEvent(flowLabel, worker.id, `left rack ${rackNumber}`, batchIds);
+                worker._passableAt = performance.now() + 3000;
+                await delay(1000);
+                const isLastRack = rackNumbers.indexOf(rackNumber) === rackNumbers.length - 1;
+                if (!isLastRack)
+                {
+                    //More racks remain — just clear the corridor so incoming worker can reach this rack
+                    await worker.moveToWorldPosition(worker.position.x, -7);
+                }
+                //await delay(1000);
+                worker._passableAt = null;
                 for (const task of tasks)
                 {
                     const box = boxObjects.find(b => b.id === task.id);
                     if (!box) continue;
-                    if (task.type === "order")
-                    {
-                        box.count -= Math.min(task.qty, box.count);
-                    }
-                    else //restock
+                    if (task.type === "order") { box.count -= Math.min(task.qty, box.count); }
+                    else
                     {
                         const space = box.capacity - box.count;
                         const toStore = Math.min(space, task.qty);
@@ -535,22 +620,20 @@ async function executeBatch(batch, source, flowContext = null)
             }
             finally { workerPool.unlockRack(Number(rackNumber)); }
         }
+        //Log rack activities after all racks are done
+        if (batch.some(t => t.type === "restock"))
+        {dataCollector.logEvent(flowLabel, worker.id, "restock medicine racks", batchIds);}
+        else
+        {dataCollector.logEvent(flowLabel, worker.id, "took medicine from racks", batchIds);}
         //Post-rack hook: outbound flows pass their staging + outbound visit here
         if (flowContext?.postRack) { await flowContext.postRack(worker, batch); }
+        if (!flowContext?.postRack)
+        {
+            const idlePos = IDLE_SLOTS[(worker.id - 1) % IDLE_SLOTS.length];
+            worker.state = "Returning to Idle";
+            await moveAroundStaging(worker, idlePos.x, idlePos.z);
+            worker.state = "Idle";
+        }
     }
     finally { worker.busy = false; }
-}
-
-//Movement helper
-function getStorageWaypoints(startX, startZ, storageX, storageZ)
-{
-    const DOOR_OUTSIDE = { x: 14.5, z: -2 }; //Main floor side of storage entrance
-    const DOOR_INSIDE  = { x: 17, z: -2 }; //Inside storage room corridor
-    return[
-        { x: DOOR_OUTSIDE.x, z: DOOR_OUTSIDE.z }, //Approach door from main floor
-        { x: DOOR_INSIDE.x,  z: DOOR_INSIDE.z }, //Step inside storage room
-        { x: storageX, z: storageZ }, //Reach storage area
-        { x: DOOR_INSIDE.x, z: DOOR_INSIDE.z  }, //Return to corridor
-        { x: DOOR_OUTSIDE.x, z: DOOR_OUTSIDE.z }, //Exit back to main floor
-    ];
 }

@@ -82,7 +82,9 @@
             <button id="toggle">Toggle HUD</button>
             <button id="auto">Start Auto</button>
             <button id="hitbox">Hitbox Debug</button>
+            <!--
             <button id="saveDataBtn">Save Simulation Data</button>
+            -->
         </div>
         <div id="hud"></div>
         <!-- 
@@ -104,14 +106,21 @@
         <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
         <script src="rack.js"></script>
         <script src="worker.js"></script>
+        <script src="movement.js"></script>
+        <!--Movement wouldn't be such a nightmare had I not forget to actually plan the smaller pathfinding, cause bigger=crash-->
         <script src="environment.js"></script>
         <script src="functions.js"></script>
         <script src="dataCollector.js"></script>
         <script>
             const scene = new THREE.Scene();
-            const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper);
+            //const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper);
             //above is WorldCentralPositiveAxis_ShowFunc, x is red, y is green, z is blue
-            const gridHelper = new THREE.GridHelper(100, 100); scene.add(gridHelper); //GridFloor_ShowFunc
+            //const gridHelper = new THREE.GridHelper(100, 100); scene.add(gridHelper); //GridFloor_ShowFunc
+            const floorGeo = new THREE.BoxGeometry(61, 0.05, 31);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.position.set(0, -0.025, 0);
+            scene.add(floor);
             scene.background = new THREE.Color(0xf2f2f2);
             const camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,100);
             camera.position.set(0,6,9);
@@ -174,8 +183,15 @@
             window.boxObjects = allBoxes;
             populateLocationDropdown(boxObjects);
             //Workers
-            workerPool = initWorkerPool(scene, 3); //Set worker amount here
-            workerPool.setInitialPositions([{x:-3,y:0,z:8},{x:3,y:0,z:8},{x:0,y:0,z:8}]);
+            workerPool = initWorkerPool(scene, 4); //Set worker amount here
+            const INITIAL_POSITIONS =
+            [
+                {x:-3,y:0,z:8},
+                {x:3,y:0,z:8},
+                {x:0,y:0,z:8},
+                {x:6,y:0,z:8}
+            ];
+            workerPool.setInitialPositions(INITIAL_POSITIONS);
             //Environment
             const staging = createStagingArea();
             staging.tableGroup.position.set(0, 0, 0);
@@ -195,7 +211,7 @@
             window.counter = counter;
             window.staging = staging;
             window.outboundRack = outboundRack;
-            //Initialize Pathfinding - include walls!
+            //Initialize static obstacles
             const allWalls = [wall1, wall2, wall3, wall4, wall5, wall6, wall7, wall8, wall9, wall10];
             window.obstacles = [];
             //Walls — need rotation-aware half-extent swap
@@ -221,12 +237,14 @@
             obstacles.push({ cx: stagingPos.x, cz: stagingPos.z,
                 halfX: staging.hitbox._collisionSize.halfX,
                 halfZ: staging.hitbox._collisionSize.halfZ });
-            //Computer desk
+            //Computer desk, use walls rotation awareness calc
             const deskPlace = new THREE.Vector3();
             desk.hitbox.getWorldPosition(deskPlace);
+            const deskRotated = Math.abs(desk.deskGroup.rotation.y) > 0.1;
+            const deskCS = desk.hitbox._collisionSize;
             obstacles.push({ cx: deskPlace.x, cz: deskPlace.z,
-                halfX: desk.hitbox._collisionSize.halfX,
-                halfZ: desk.hitbox._collisionSize.halfZ });
+                halfX: deskRotated ? deskCS.halfZ : deskCS.halfX,
+                halfZ: deskRotated ? deskCS.halfX : deskCS.halfZ });
             //Counter
             const counterPlace = new THREE.Vector3();
             counter.hitbox.getWorldPosition(counterPlace);
@@ -234,14 +252,18 @@
                 halfX: counter.hitbox._collisionSize.halfX,
                 halfZ: counter.hitbox._collisionSize.halfZ });
             //HUD
+            let lastFrameTime = performance.now();
+            let fps = 0;
             function updateHUD()
             {
-                let html=`<strong>Runtime:</strong> ${simulationTime.toFixed(1)}s<br><br>`;
-                html+=`${workerPool.getStatusHTML()}<br><br>`;
-                html+=`Masih perlu tambah perpindahan worker bos, hurhurhur<br><br>`;
-                html+=`<strong>Overflow Queue:</strong> ${overflowQueue.map(o=>o.id+"("+o.qty+")").join(", ") || "Empty"}<br><br>`;
-                allBoxes.forEach(b=>{ html+=`${b.id}: ${b.count}/${b.capacity}<br>`; });
-                document.getElementById("hud").innerHTML=html;
+                let html = `<strong>FPS:</strong> ${fps.toFixed(1)}<br>`;
+                html += `<strong>Runtime:</strong> ${
+                simulationTime = automationRunning ? ((performance.now() - dataCollector.startTime) / 1000).toFixed(2) : simulationTime
+                }s<br><br>`;
+                html += `${workerPool.getStatusHTML()}<br><br>`;
+                //html += `<strong>Overflow Queue:</strong> ${overflowQueue.map(o=>o.id+"("+o.qty+")").join(", ") || "Empty"}<br><br>`;
+                //allBoxes.forEach(b=>{ html += `${b.id}: ${b.count}/${b.capacity}<br>`; });
+                document.getElementById("hud").innerHTML = html;
                 if(!hudVisible) return;
             }
             //Toggles or Buttons
@@ -251,9 +273,33 @@
             let automationRunning = false;
             document.getElementById("auto").addEventListener("click", () =>
             {
-                automationRunning = !automationRunning;
-                document.getElementById("auto").textContent = automationRunning ? "Stop Auto" : "Start Auto";
+                if (automationRunning)
+                {
+                    automationRunning = false;
+                    document.getElementById("auto").textContent = "Start Auto";
+                    exportSimulationData();
+                }
+                else
+                {
+                    resetSimulation();
+                    automationRunning = true;
+                    document.getElementById("auto").textContent = "Stop Auto";
+                }
             });
+            function resetSimulation()
+            {
+                simulationTime = 0;
+                dataCollector.clear();
+                doorwayManager.leavingCount = 0;
+                doorwayManager.enterLocked = false;
+                doorwayManager._enterLockedAt = null;
+                doorwayManager._leavingStartedAt = [];
+                supplierQueue.length = 0;
+                overflowQueue.length = 0;
+                pendingSupplier.clear();
+                workerPool.resetAll(INITIAL_POSITIONS);
+                console.log("[SIM] Simulation reset");
+            }
             let hitboxDebug = false;
             document.getElementById("hitbox").addEventListener("click", () =>
             {
@@ -284,14 +330,19 @@
                 document.getElementById("hitbox").textContent = hitboxDebug ? "Hide Hitboxes" : "Hitbox Debug";
             });
             //Sim Loops
-            setInterval(()=>{ if(automationRunning) processDelivery(allBoxes); updateBoxes(allBoxes); },5000); //Delivery Loop
+            setInterval(()=>
+            {
+                updateBoxes(allBoxes);
+                if(!automationRunning) return;
+                if(Math.random() < 0.7) processOutbound(allBoxes);
+                else processDelivery(allBoxes);
+            }, 7000); //Combined flow loop: 70% outbound, 30% inbound
             //setInterval(()=>{ if(automationRunning) processOrder(allBoxes); updateBoxes(allBoxes); },7000); //Order Loop
-            setInterval(()=>{ if(automationRunning) processOutbound(allBoxes); },9000); //Outbound Loop
             setInterval(async ()=>{ if(automationRunning && workerPool.workers.some(w=>!w.busy)) await workerPool.repositionAllIdle(); },8000);
             setInterval(()=>{ if(automationRunning) checkReorderTriggers(allBoxes); },100); //Failsafe1 checker
             setInterval(()=>{ if(automationRunning) processSupplierQueue(); },3000); //Failsafe1: Emergency restock
             setInterval(()=>{ if(automationRunning) processOverflow(allBoxes); },2000); //Failsafe2: Too much stock
-            //setInterval(()=>{ tickSimulation(0.1); },100); //Simulation Tick Show (Debug Purp), comment to end
+            setInterval(() => { if(automationRunning) dataCollector.logFPS(fps); },2000); //FPS Tracking, per 2 seconds
             setInterval(()=>{ updateHUD(); },100); //HUD Update
             //Resize
             window.addEventListener("resize",()=>{
@@ -300,7 +351,16 @@
             renderer.setSize(window.innerWidth,window.innerHeight);
             });
             //Animating
-            function animate(){ requestAnimationFrame(animate); renderer.render(scene,camera); moveTarget(camera)}
+            function animate()
+            {
+                const now = performance.now();
+                const dt = now - lastFrameTime;
+                fps = dt > 0 ? 1000 / dt : fps;
+                lastFrameTime = now;
+                requestAnimationFrame(animate);
+                renderer.render(scene,camera);
+                moveTarget(camera);
+            }
             updateHUD();
             animate();
 
@@ -309,12 +369,12 @@
             //     const data = dataCollector.getData();
             //     console.table(data);
             // });
-
+            /*
             document.getElementById("saveDataBtn").addEventListener("click", () =>
             {
                 exportSimulationData();
             });
-
+            */
             function exportSimulationData()
             {
                 const data = dataCollector.getData();
@@ -325,6 +385,7 @@
                     return;
                 }
 
+                /*
                 //Tambah nomor urut
                 const numberedData = data.map((row, index) => ({
                     No: index + 1,
@@ -334,11 +395,24 @@
                     item: row.item,
                     rack: row.rack
                 }));
+                */
+                //Newer detailed format
+                const numberedData = data.map((row, index) => ({
+                    No: index + 1,
+                    time: row.time,
+                    flow_type: row.flow_type,
+                    worker: row.worker,
+                    activity: row.activity,
+                    items: row.items
+                }));
 
                 const worksheet = XLSX.utils.json_to_sheet(numberedData);
 
                 const workbook = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(workbook, worksheet, "Simulation Data");
+
+                const fpsSheet = XLSX.utils.json_to_sheet(dataCollector.fpsRecords);
+                XLSX.utils.book_append_sheet(workbook, fpsSheet, "FPS Log");
 
                 XLSX.writeFile(workbook, "pharmacy_simulation.xlsx");
             }

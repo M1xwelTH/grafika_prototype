@@ -8,38 +8,6 @@ let debugHitboxVisible = false;
 //Collision <simple>
 const WORKER_HALF_X = 1.0;
 const WORKER_HALF_Z = 1.0;
-function isColliding(x, z)
-{
-    if (!window.obstacles) return false;
-    for (const obs of window.obstacles)
-    {
-        if (Math.abs(x - obs.cx) < WORKER_HALF_X + obs.halfX &&
-            Math.abs(z - obs.cz) < WORKER_HALF_Z + obs.halfZ)
-            return true;
-    }
-    return false;
-}
-function isCollidingWithWorkers(x, z, selfId)
-{
-    const WORKER_HALF_X = 1.0;
-    const WORKER_HALF_Z = 1.0;
-    for (const other of workerPool.workers)
-    {
-        if (other.id === selfId) continue; //skip self
-        if (!other.position) continue; //skip uninitialized
-        if (!other.model.visible) continue; //skip hidden workers
-        if (Math.abs(x - other.position.x) < WORKER_HALF_X * 2 && Math.abs(z - other.position.z) < WORKER_HALF_Z * 2)
-        { return true; }
-    }
-    return false;
-}
-
-//Storage Area handling
-function isWorkerFullyInsideArea(workerPos, areaWorldPos, areaHalfX, areaHalfZ)
-{
-    return Math.abs(workerPos.x - areaWorldPos.x) < areaHalfX - WORKER_HALF_X &&
-           Math.abs(workerPos.z - areaWorldPos.z) < areaHalfZ - WORKER_HALF_Z;
-}
  
 //Traversal Order
 function getTraversalOrder(boxObjects){ return [...boxObjects].sort((a,b)=>a.id.localeCompare(b.id)); }
@@ -54,11 +22,18 @@ class SimulationWorker
         this.state = "Idle";
         this.lastIndex = 0;
         this.currentRack = null; // last rack number visited (null = not yet assigned)
+        this._stuckTicks = 0;
         this.model = this._buildModel(scene, color);
         this.shadow = this._buildShadow(scene);
         this.indicator = this._buildIndicator(scene);
         this.position = null; //Positioning
         this.hitbox = this._buildHitbox(scene);
+        this._escaping = false;
+        this._escapeCooldown = 0;
+        this._escapeAttempts = 0;
+        this._moveDeadline = null;
+        this._passableAt = null;
+        this._isRepositioning = false;
         //this.pathCache = new Map(); // {targetKey: path}
     }
     //Visual builders
@@ -152,7 +127,7 @@ class SimulationWorker
         console.log(`[WORKER ${this.id}] Moving from Rack ${this.currentRack ?? "base"} → Rack ${rackNumber}`);
         this.state = `Moving to Rack ${rackNumber}`;
         this.lastIndex = 0;
-        await this.moveToWorldPosition(interactPos.x, interactPos.z);
+        await moveAroundStaging(this, interactPos.x, interactPos.z);
         this.currentRack = rackNumber;
     }
     async searchAndInteract(targetIDs, boxObjects)
@@ -160,6 +135,7 @@ class SimulationWorker
         const startTime = performance.now();
         console.log(`[WORKER ${this.id}] Search start | Targets: ${targetIDs.join(", ")}`);
         this.state = "Searching";
+        this._passableAt = performance.now() + 5000; // passable after 5s, covers long multi-box searches
         //Get the interaction area's Z for the current rack to stay aligned
         const rack = racks.find(r => r.boxObjects[0]?.rack === this.currentRack && r.boxObjects[0]?.type === 'medicine');
         const interactionZ = rack ? (() =>
@@ -179,13 +155,14 @@ class SimulationWorker
         let currentIndex = this.lastIndex;
         for (const targetID of targetIDs)
         {
+            /*
             dataCollector.logEvent(
                 "SEARCH",
                 this.id,
                 targetID,
                 this.currentRack
             );
-
+            */ //Changed format, currently unused anymore
             let found = false;
             let scannedCount = 0;
             while (!found && scannedCount < traversal.length)
@@ -203,18 +180,18 @@ class SimulationWorker
                 {
                     this.state = `Interacting ${box.id}`;
                     setBoxTempColor(box, 0xff8800); //orange = interacting
-                    this._showAt(worldPos.x, interactionZ); //X follows box
                     await delay(INTERACTION_DELAY);
                     restoreBoxColor(box);
-                    this._showAt(interactionX, interactionZ); //returns X base
                     found = true;
 
+                    /*
                     dataCollector.logEvent(
                         "PICKUP",
                         this.id,
                         box.id,
                         this.currentRack
                     );  
+                    */ //Changed format, currently unused anymore
                 }
                 else { restoreBoxColor(box); }
                 currentIndex = (currentIndex + 1) % traversal.length;
@@ -227,7 +204,8 @@ class SimulationWorker
         this.indicator.visible = false;
         //this._hide(); //After movement no longer needed
         this.lastIndex = currentIndex; //to not reset search after finding a box
-        this.state = "Idle";
+        this._passableAt = performance.now() + 1500; //brief exit window after search ends
+        this.state = "Done Searching"; //caller set next state
     }
     _isInAnyInteractionArea()
     {
@@ -256,6 +234,13 @@ class SimulationWorker
             const dz = targetZ - this.position.z;
             const dist = Math.sqrt(dx * dx + dz * dz);
             if (dist < TOLERANCE) break;
+            // Timeout check — force snap and exit if deadline exceeded
+            if (this._moveDeadline && performance.now() > this._moveDeadline)
+            {
+                console.warn(`[WORKER ${this.id}] Move timeout, snapping to (${targetX},${targetZ})`);
+                this._showAt(targetX, targetZ);
+                break;
+            }
             const step = Math.min(MOVE_SPEED, dist);
             const nx = (dx / dist) * step;
             const nz = (dz / dist) * step;
@@ -268,24 +253,146 @@ class SimulationWorker
 
             if (!blockedFull)
             {
+                const prevDist = dist;
                 this.model.position.x += nx; this.model.position.z += nz;
                 this.shadow.position.x += nx; this.shadow.position.z += nz;
                 this.hitbox.position.x += nx; this.hitbox.position.z += nz;
                 this.position.x += nx; this.position.z += nz;
+                const newDist = Math.sqrt(
+                    (targetX - this.position.x) ** 2 +
+                    (targetZ - this.position.z) ** 2
+                );
+                //Only reset if progressing AND no worker is still touching us at new position
+                //Prevents tango from resetting the counter on momentary diagonal clearance
+                const stillTouching = workerPool.workers.some(other =>
+                    other.id !== this.id && other.position && other.model.visible &&
+                    !other._escaping &&
+                    (other._passableAt === null || performance.now() <= other._passableAt) &&
+                    Math.abs(this.position.x - other.position.x) <= WORKER_HALF_X * 2 + 2 &&
+                    Math.abs(this.position.z - other.position.z) <= WORKER_HALF_Z * 2 + 2
+                );
+                if (newDist < prevDist - 0.01 && !stillTouching)
+                    this._stuckTicks = 0;
+                else
+                    this._stuckTicks++;
             }
             else if (!blockedX)
             {
                 this.model.position.x += nx; this.shadow.position.x += nx;
                 this.hitbox.position.x += nx; this.position.x += nx;
+                this._stuckTicks++;
             }
             else if (!blockedZ)
             {
                 this.model.position.z += nz; this.shadow.position.z += nz;
                 this.hitbox.position.z += nz; this.position.z += nz;
+                this._stuckTicks++;
             }
-            //else: fully blocked this tick, wait for other worker to move
-            await delay(16);
+            else { this._stuckTicks++; }
+            if (dist < MOVE_SPEED * 3 && this._stuckTicks >= 10)
+            {
+                this._showAt(targetX, targetZ);
+                break;
+            }
+            //Last resort — snap after prolonged stuck regardless of zone or nearby workers
+            if (this._stuckTicks >= 150)
+            {
+                console.warn(`[WORKER ${this.id}] Force snap after prolonged stuck at (${this.position.x.toFixed(1)},${this.position.z.toFixed(1)})`);
+                this._showAt(targetX, targetZ);
+                break;
+            }
+            //Diagonal escape — fires regardless of which branch ran above, triggers after 20 ticks of any non-full movement
+            if (this._escapeCooldown > 0) this._escapeCooldown--;
+            if (this._stuckTicks >= 20 && this._escapeCooldown <= 0 && !this._escaping)
+            {
+                //Only attempt escape if there's actually a worker nearby
+                const workerNearby = workerPool.workers.some(other =>
+                    other.id !== this.id &&
+                    other.position &&
+                    other.model.visible &&
+                    Math.abs(this.position.x - other.position.x) <= WORKER_HALF_X * 2 + 2 &&
+                    Math.abs(this.position.z - other.position.z) <= WORKER_HALF_Z * 2 + 2
+                );
+                const inRestrictedZone =
+                    (this.position.x > 12.5 && Math.abs(this.position.z - (-2)) < 5) || //doorway entrance corridor (z: -7 to +3)
+                    (this.position.x > 19 && this.position.z < -4); //storage interior
+                    //(Math.abs(this.position.x) < 8 && Math.abs(this.position.z) < 6) || //staging zone
+                    //(this.position.z < -10 && this.position.x < 6) || //rack corridor
+                    //(this.position.x > 15 && this.position.x < 21 && this.position.z > 9) || //counter zone
+                    //(this.position.x < -26 && this.position.z > 9); //desk zone
+                if (workerNearby && !inRestrictedZone)
+                {
+                    const blocker = workerPool.workers.find(other =>
+                        other.id !== this.id &&
+                        other.position &&
+                        other.model.visible &&
+                        Math.abs(this.position.x - other.position.x) < WORKER_HALF_X * 2 + 0.5 &&
+                        Math.abs(this.position.z - other.position.z) < WORKER_HALF_Z * 2 + 0.5
+                    );
+                    //ID determines priority so two workers always pick from opposite ends of the list, guaranteeing divergence
+                    const allCandidates =
+                    [
+                        { x: this.position.x + 3, z: this.position.z + 3 },
+                        { x: this.position.x - 3, z: this.position.z - 3 },
+                        { x: this.position.x - 3, z: this.position.z + 3 },
+                        { x: this.position.x + 3, z: this.position.z - 3 },
+                    ];
+                    //Higher ID picks from front of list, lower ID picks from back, said to guarantee divergance
+                    const ordered = blocker && this.id > blocker.id ? allCandidates : [...allCandidates].reverse();
+                    //_escapeAttempts rotates through ordered list on repeated failures
+                    const startIndex = (this._escapeAttempts || 0) % ordered.length;
+                    const rotated = [...ordered.slice(startIndex), ...ordered.slice(0, startIndex)];
+                    const valid = rotated.filter(c =>
+                        !isColliding(c.x, c.z) && !isCollidingWithWorkers(c.x, c.z, this.id)
+                    );
+                    if (valid.length > 0)
+                    {
+                        const pick = valid[0]; // takefirst valid from ordered list, not random
+                        this._stuckTicks = 0;
+                        console.log(`[WORKER ${this.id}] Diagonal escape to (${pick.x},${pick.z})`);
+                        this._escaping = true;
+                        await this.moveToWorldPosition(pick.x, pick.z);
+                        this._escaping = false;
+                        this._escapeCooldown = 60; // ~960ms at 16ms/tick, prevents immediate re-trigger
+                        this.state = "Moving";
+                    }
+                    else
+                    {
+                        //All blocked — rotate start index next attempt
+                        this._escapeAttempts = (this._escapeAttempts || 0) + 1;
+                    }
+                }
+                else if (!workerNearby && this._stuckTicks >= 50 && this._escapeCooldown <= 0)
+                {
+                    const wallEscapeCandidates =
+                    [
+                        { x: this.position.x - 2, z: this.position.z     },
+                        { x: this.position.x + 2, z: this.position.z     },
+                        { x: this.position.x,     z: this.position.z + 2 },
+                        { x: this.position.x,     z: this.position.z - 2 },
+                        { x: this.position.x - 2, z: this.position.z + 2 },
+                        { x: this.position.x + 2, z: this.position.z + 2 },
+                        { x: this.position.x - 2, z: this.position.z - 2 },
+                        { x: this.position.x + 2, z: this.position.z - 2 },
+                    ];
+                    //I'll let the clutter above for now because dear Lord I'm not hitting my head again for the hundreth time again 
+                    const valid = wallEscapeCandidates.filter(c =>
+                        !isColliding(c.x, c.z) && !isCollidingWithWorkers(c.x, c.z, this.id)
+                    );
+                    if (valid.length > 0)
+                    {
+                        this._stuckTicks = 0;
+                        this._escaping = true;
+                        await this.moveToWorldPosition(valid[0].x, valid[0].z);
+                        this._escaping = false;
+                        this._escapeCooldown = 60;
+                        this.state = "Moving";
+                    }
+                }
+            }
+            await delay(16); //Tickrate?
         }
+        this._escapeAttempts = 0; // arrived at destination, fresh start next movement
         this._showAt(targetX, targetZ);
         this.state = "Idle";
         console.log(`[WORKER ${this.id}] Arrived at (${targetX.toFixed(1)},${targetZ.toFixed(1)})`);
@@ -353,31 +460,37 @@ class WorkerPool
     //Idle Positioning: spread workers so they don't block each other, still doesn't work LMAO
     getIdlePosition(worker)
     {
-        //If worker has visited a rack, idle just behind that rack's interaction area
-        if (worker.currentRack !== null)
-        {
-            const rack = racks.find(r => r.boxObjects[0]?.rack === worker.currentRack && r.boxObjects[0]?.type === 'medicine');
-            if (rack)
-            {
-                const worldPos = new THREE.Vector3();
-                rack.interactionArea.getWorldPosition(worldPos);
-                //Step back 2 units away from the rack (positive Z = toward open floor)
-                return { x: worldPos.x, z: worldPos.z + 2 };
-            }
-        }
-        //Fallback: stay at current position if no rack visited yet
-        return { x: worker.position.x, z: worker.position.z };
+        //Use IDLE_SLOTS defined in functions.js, accessible globally, worker ID determines which slot, spreading workers out
+        return IDLE_SLOTS[(worker.id - 1) % IDLE_SLOTS.length];
     }
     async repositionAllIdle()
     {
-        for (let i = 0; i < this.workers.length; i++)
+        if (this._isRepositioning) return;
+        this._isRepositioning = true;
+        try
         {
-            const worker = this.workers[i];
-            if (worker.busy) continue;
-            if (!worker._isInAnyInteractionArea()) continue;
-            const idlePos = this.getIdlePosition(worker); //pass worker, not index
-            await worker.moveToWorldPosition(idlePos.x, idlePos.z);
+            for (let i = 0; i < this.workers.length; i++)
+            {
+                const worker = this.workers[i];
+                if (worker.busy) continue;
+                //Extended doorway zone: x between 14.5-2 and 17+2, z near -2
+                //Any idle worker parked here gets pushed to x:11 on the main floor
+                const inDoorway = worker.position.x > 12.5 && worker.position.x < 19 && Math.abs(worker.position.z - (-2)) < 2;
+                if (inDoorway)
+                {
+                    console.log(`[WORKER ${worker.id}] Clearing doorway`);
+                    worker.state = "Clearing doorway";
+                    await worker.moveToWorldPosition(11, -2);
+                    worker.state = "Idle";
+                    continue; // skip the interaction area check below for this worker
+                }
+                if (!worker._isInAnyInteractionArea()) continue;
+                const idlePos = this.getIdlePosition(worker); //pass worker, not index
+                await moveAroundStaging(worker, idlePos.x, idlePos.z);
+                worker.state = "Idle";
+            }
         }
+        finally { this._isRepositioning = false; }
     }
     //Area occupancy, same pattern as rack locks
     lockArea(key) { this.occupiedAreas.add(key); }
@@ -397,6 +510,28 @@ class WorkerPool
             if (d < bestDist) { bestDist = d; best = { key, pos: iaPos }; }
         });
         return best;
+    }
+    //ResetAll
+    resetAll(positions)
+    {
+        this.occupiedRacks.clear();
+        this.occupiedAreas.clear();
+        this.workers.forEach((worker, i) =>
+        {
+            worker.busy = false;
+            worker.state = "Idle";
+            worker.lastIndex = 0;
+            worker.currentRack = null;
+            worker._stuckTicks = 0;
+            worker._escapeCooldown = 0;
+            worker._escapeAttempts = 0;
+            worker._moveDeadline = null;
+            worker._escaping = false;
+            worker.indicator.visible = false;
+            worker._passableAt = null;
+            const pos = positions[i % positions.length];
+            worker._showAt(pos.x, pos.z);
+        });
     }
 }
  
