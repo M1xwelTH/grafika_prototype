@@ -4,7 +4,6 @@ Includes: Simulation State, Manual Order Functions, Automated Order Functions (i
 Don't forget to change things to consumption (order) and restock (delivery and arrival) for readibility
 */
 
-
 //Sim State
 let simulationTime = 0;
 let lastDeliverySummary = "None";
@@ -108,11 +107,7 @@ function moveTarget(camera) //Move centre
     forward.x /= length;
     forward.z /= length;
     //right vector
-    let right =
-    {
-        x: forward.z,
-        z: -forward.x
-    };
+    let right = { x: forward.z, z: -forward.x };
     if (keys["arrowup"] || keys["w"])
     {
         target.x += forward.x * moveSpeed;
@@ -142,8 +137,7 @@ function populateLocationDropdown(boxObjects)
     const select = document.getElementById("boxSelect");
     if(!select) return;
     select.innerHTML = "";
-    boxObjects.forEach(box =>
-        {
+    boxObjects.forEach(box =>{
         const option = document.createElement("option");
         option.value = box.id;
         option.textContent = box.id;
@@ -254,8 +248,7 @@ function generateWeightedRandomBatch(boxObjects, batchType = "order")
         {
             if (roll < candidate.weight)
             {
-                batch.push(
-                {
+                batch.push({
                     id: candidate.box.id,
                     qty: batchType === "order" 
                         ? Math.floor(Math.random() * 12) + 1
@@ -365,8 +358,7 @@ async function processOutbound(allBoxes)
     await executeBatch(batch, "outbound",
     {
         flowLabel: flowLabel,
-        preRack: async (worker) =>
-        {
+        preRack: async (worker) =>{
             const areaKey = flowType === 'desk' ? 'desk' : 'counter';
             const areaIA  = flowType === 'desk' ? desk.interactionArea : counter.interactionArea;
             while (!workerPool.isAreaFree(areaKey)) { await delay(500); }
@@ -396,8 +388,7 @@ async function processOutbound(allBoxes)
             }
             finally { workerPool.unlockArea(areaKey); }
         },
-        postRack: async (worker, batch) =>
-        {
+        postRack: async (worker, batch) =>{
             // Wait for nearest free staging slot
             let stagingSlot = null;
             while (!stagingSlot)
@@ -442,7 +433,7 @@ function analyzeBatch(batch, boxObjects)
 {
     let willOverflow = false;
     let willUnderflow = false;
-    batch.forEach(task => {
+    batch.forEach(task =>{
         const box = boxObjects.find(b => b.id === task.id);
         if(task.type === "restock") { if(box.count + task.qty > box.capacity) willOverflow = true; }
         if(task.type === "order") { if(box.count - task.qty <= 10) willUnderflow = true; }
@@ -495,8 +486,7 @@ async function processSupplierQueue()
 function groupTasksByRack(batch)
 {
     const groups = {};
-    batch.forEach(task =>
-    {
+    batch.forEach(task =>{
         const match = task.id.match(/\d+/); //First number anywhere in the ID, handles "O1A1" too
         const rackNumber = match ? parseInt(match[0]) : null;
         if (rackNumber === null) { console.warn(`[BATCH] Could not parse rack from ID: ${task.id}`); return; }

@@ -39,19 +39,6 @@
                 border-radius:6px;
                 font-size:14px;
             }
-            #manualPnl
-            {
-                position:absolute;
-                top:10px;
-                right:10px;
-                width:220px;
-                max-height:90vh;
-                background:rgba(255,255,255,0.9);
-                padding:10px;
-                border-radius:6px;
-                overflow-y:auto; /* allows scrolling */
-                font-size:14px;
-            }
             #mt
             {
                 text-align:center;
@@ -81,41 +68,24 @@
         <div id="buttonTog">
             <button id="toggle">Toggle HUD</button>
             <button id="auto">Start Auto</button>
+            <button id="peak" disabled>Peak Hours</button>
             <button id="hitbox">Hitbox Debug</button>
-            <!--
-            <button id="saveDataBtn">Save Simulation Data</button>
-            -->
         </div>
         <div id="hud"></div>
-        <!-- 
-        <div id="manualPnl">
-            <div id="mt">Place Arrival/Customer Order
-                <label>Lokasi:</label><br>
-                <select id="boxSelect"></select><br>
-                <label>Qty:</label><br>
-                <input type="number" id="pickQty" value="1" min="1" style="width:60px"><br><br>
-                <button onclick="addPick2()">Restock</button>
-                <button onclick="addPick()">Consumption</button>
-                <div id="pickList"> ===Belum ada item=== </div>
-                    <button onclick="submitManualBatch()">Submit</button>
-                </div>
-            </div>
-        </div>
-        -->
         <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
         <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+        <script src="camera.js"></script>
         <script src="rack.js"></script>
-        <script src="worker.js"></script>
-        <script src="movement.js"></script>
-        <!--Movement wouldn't be such a nightmare had I not forget to actually plan the smaller pathfinding, cause bigger=crash-->
+        <script src="worker_V2.js"></script>
+        <script src="movement_V2.js"></script>
         <script src="environment.js"></script>
-        <script src="functions.js"></script>
-        <script src="dataCollector.js"></script>
+        <script src="functions_V2.js"></script>
+        <script src="dataCollector_V2.js"></script>
         <script>
             const scene = new THREE.Scene();
             //const axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper);
             //above is WorldCentralPositiveAxis_ShowFunc, x is red, y is green, z is blue
-            const gridHelper = new THREE.GridHelper(100, 100); scene.add(gridHelper); //GridFloor_ShowFunc
+            //const gridHelper = new THREE.GridHelper(100, 100); scene.add(gridHelper); //GridFloor_ShowFunc
             const floorGeo = new THREE.BoxGeometry(61, 0.05, 31);
             const floorMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
             const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -158,23 +128,56 @@
             //Rack
             const racks = [];
             //Here be medicine rack
-            const rack1 = createMedicineRack(1); rack1.rackGroup.position.set(-27.45,0,-13.95); //start at wall edge + half rack depth
-            const rack2 = createMedicineRack(2); rack2.rackGroup.position.set(-23.35,0,-13.95);
-            const rack3 = createMedicineRack(3); rack3.rackGroup.position.set(-19.25,0,-13.95);
-            const rack4 = createMedicineRack(4); rack4.rackGroup.position.set(-15.15,0,-13.95);
-            const rack5 = createMedicineRack(5); rack5.rackGroup.position.set(-11.05,0,-13.95);
-            const rack6 = createMedicineRack(6); rack6.rackGroup.position.set(-6.95,0,-13.95);
-            const rack7 = createMedicineRack(7); rack7.rackGroup.position.set(-2.85,0,-13.95);
-            const rack8 = createMedicineRack(8); rack8.rackGroup.position.set(1.25,0,-13.95);
-            scene.add(rack1.rackGroup);
-            scene.add(rack2.rackGroup);
-            scene.add(rack3.rackGroup);
-            scene.add(rack4.rackGroup);
-            scene.add(rack5.rackGroup);
-            scene.add(rack6.rackGroup);
-            scene.add(rack7.rackGroup);
-            scene.add(rack8.rackGroup);
-            racks.push(rack1,rack2,rack3,rack4,rack5,rack6,rack7,rack8);
+            // --- BAGIAN LAYOUT BARU ---
+            // --- LAYOUT POJOK KIRI ATAS ---
+            // --- LAYOUT POJOK KIRI ATAS ---
+            // --- LAYOUT DUA LORONG BERHADAPAN (POJOK KIRI ATAS) ---
+            // --- LAYOUT BACK-TO-BACK (LORONG GANDA) ---
+            const rack = [];
+
+            // BARIS 1 & 2 (LORONG PERTAMA - Kiri)
+            // Baris 1: Menempel dinding kiri, menghadap Kanan
+            const rack1 = createMedicineRack(1); 
+            rack1.rackGroup.rotation.y = Math.PI / 2; 
+            rack1.rackGroup.position.set(-28.9, 0, -10); 
+
+            const rack2 = createMedicineRack(2); 
+            rack2.rackGroup.rotation.y = Math.PI / 2; 
+            rack2.rackGroup.position.set(-28.9, 0, -5); 
+
+            // Baris 2: Berhadapan dengan Baris 1, menghadap Kiri
+            const rack3 = createMedicineRack(3); 
+            rack3.rackGroup.rotation.y = -Math.PI / 2; 
+            rack3.rackGroup.position.set(-22, 0, -10); 
+
+            const rack4 = createMedicineRack(4); 
+            rack4.rackGroup.rotation.y = -Math.PI / 2; 
+            rack4.rackGroup.position.set(-22, 0, -5); 
+
+
+            // BARIS 3 & 4 (LORONG KEDUA - Kanan)
+            // Baris 3: Berdempetan dengan Baris 2 (Membelakangi), menghadap Kanan
+            // X disetel ke -20.9 (hanya selisih ~1.1 unit dari Baris 2 untuk efek menempel)
+            const rack5 = createMedicineRack(5); 
+            rack5.rackGroup.rotation.y = Math.PI / 2; 
+            rack5.rackGroup.position.set(-20.9, 0, -10); 
+
+            const rack6 = createMedicineRack(6); 
+            rack6.rackGroup.rotation.y = Math.PI / 2; 
+            rack6.rackGroup.position.set(-20.9, 0, -5); 
+
+            // Baris 4: Berhadapan dengan Baris 3, menghadap Kiri
+            const rack7 = createMedicineRack(7); 
+            rack7.rackGroup.rotation.y = -Math.PI / 2; 
+            rack7.rackGroup.position.set(-14, 0, -10); 
+
+            const rack8 = createMedicineRack(8); 
+            rack8.rackGroup.rotation.y = -Math.PI / 2; 
+            rack8.rackGroup.position.set(-14, 0, -5); 
+
+            // Masukkan ke array dan scene
+            racks.push(rack1, rack2, rack3, rack4, rack5, rack6, rack7, rack8);
+            racks.forEach(r => scene.add(r.rackGroup));
             //Here be Outbound rack
             const outboundRack = createOutboundRack(1); outboundRack.rackGroup.rotation.y = Math.PI;
             outboundRack.rackGroup.position.set(9, 0, 13.95); scene.add(outboundRack.rackGroup);
@@ -189,18 +192,22 @@
                 {x:-3,y:0,z:8},
                 {x:3,y:0,z:8},
                 {x:0,y:0,z:8},
-                {x:6,y:0,z:8}
+                {x:6,y:0,z:8}//,
+                /*{x:-6,y:0,z:8},
+                {x:-9,y:0,z:8}//,
+                /*{x:-12,y:0,z:8},
+                {x:-15,y:0,z:8}*/
             ];
-            workerPool.setInitialPositions(INITIAL_POSITIONS);
+            //Note: setInitialPositions called after buildGrid() below
             //Environment
             const staging = createStagingArea();
             staging.tableGroup.position.set(0, 0, 0);
             scene.add(staging.tableGroup);
             const desk = createComputerDesk(); desk.deskGroup.rotation.y = Math.PI/2;
-            desk.deskGroup.position.set(-28.5,0,13);
+            desk.deskGroup.position.set(-28.45,0,12.95);
             scene.add(desk.deskGroup);
             const counter = createCounter();
-            counter.counterGroup.position.set(18, 0, 13.5); //wallPosition-wallThickness/2-counterDepth/2
+            counter.counterGroup.position.set(18, 0, 13.45); //wallPosition-wallThickness/2-counterDepth/2 and -0.05 adjustment
             scene.add(counter.counterGroup);
             const storageArea = createStorageArea();
             storageArea.storageGroup.position.set(24.5, 0, -9.5); //edges-wallThickness/2
@@ -218,7 +225,7 @@
             allWalls.forEach(w => {
                 const pos = new THREE.Vector3();
                 w.hitbox.getWorldPosition(pos);
-                const rotated = Math.abs(w.wallGroup.rotation.y) > 0.1; // is PI/2 rotated?
+                const rotated = Math.abs(w.wallGroup.rotation.y) > 0.1; //is PI/2 rotated?
                 const { halfX, halfZ } = w.hitbox._collisionSize;
                 obstacles.push({ cx: pos.x, cz: pos.z,
                     halfX: rotated ? halfZ : halfX,
@@ -228,8 +235,13 @@
             racks.forEach(r => {
                 const pos = new THREE.Vector3();
                 r.hitbox.getWorldPosition(pos);
+                const rotated = Math.abs(Math.round(r.rackGroup.rotation.y / (Math.PI / 2)) % 2) === 1; // true only for ±90°
                 const { halfX, halfZ } = r.hitbox._collisionSize;
-                obstacles.push({ cx: pos.x, cz: pos.z, halfX, halfZ });
+                obstacles.push({
+                    cx: pos.x, cz: pos.z,
+                    halfX: rotated ? halfZ : halfX,
+                    halfZ: rotated ? halfX : halfZ,
+                });
             });
             //Staging table
             const stagingPos = new THREE.Vector3();
@@ -254,6 +266,7 @@
             //HUD
             let lastFrameTime = performance.now();
             let fps = 0;
+            let simulationTime = 0;
             function updateHUD()
             {
                 let html = `<strong>FPS:</strong> ${fps.toFixed(1)}<br>`;
@@ -261,10 +274,18 @@
                 simulationTime = automationRunning ? ((performance.now() - dataCollector.startTime) / 1000).toFixed(2) : simulationTime
                 }s<br><br>`;
                 html += `${workerPool.getStatusHTML()}<br><br>`;
+                html += `<strong>Flow Queue</strong> (${flowQueue.pendingCount} pending, ${flowQueue.failedCount} expired):<br>`;
+                html += flowQueue.getStatusHTML() + '<br><br>';
                 //html += `<strong>Overflow Queue:</strong> ${overflowQueue.map(o=>o.id+"("+o.qty+")").join(", ") || "Empty"}<br><br>`;
                 //allBoxes.forEach(b=>{ html += `${b.id}: ${b.count}/${b.capacity}<br>`; });
-                document.getElementById("hud").innerHTML = html;
+                if (peakHoursActive && peakStartedAt !== null)
+                {
+                    const elapsedSimMin  = ((performance.now() - peakStartedAt) / 1000 * SIM_SPEED / 60).toFixed(1);
+                    const remainingSimMin = Math.max(0, PEAK_HOURS_SIM_MIN - elapsedSimMin).toFixed(1);
+                    html += `<strong style="color:orange"> PEAK HOURS — ${remainingSimMin} sim-min left</strong><br><br>`;
+                }
                 if(!hudVisible) return;
+                document.getElementById("hud").innerHTML = html;
             }
             //Toggles or Buttons
             let hudVisible = true;
@@ -277,29 +298,70 @@
                 {
                     automationRunning = false;
                     document.getElementById("auto").textContent = "Start Auto";
+                    document.getElementById("peak").disabled = true; //Can't use peak when stopped
+                    if (peakHoursActive) deactivatePeakHours(); //Clean up if peak was running
                     exportSimulationData();
                 }
                 else
                 {
                     resetSimulation();
                     automationRunning = true;
+                    document.getElementById("peak").disabled = false;
                     document.getElementById("auto").textContent = "Stop Auto";
                 }
             });
             function resetSimulation()
             {
+                if (peakHoursActive) deactivatePeakHours();
                 simulationTime = 0;
                 dataCollector.clear();
-                doorwayManager.leavingCount = 0;
-                doorwayManager.enterLocked = false;
-                doorwayManager._enterLockedAt = null;
-                doorwayManager._leavingStartedAt = [];
-                supplierQueue.length = 0;
+                flowQueue.clear();
+                customerQueue.clear();
                 overflowQueue.length = 0;
                 pendingSupplier.clear();
+                resetTileOccupants();
                 workerPool.resetAll(INITIAL_POSITIONS);
+                workerPool.workers.forEach(w => occupyInitialTile(w));
                 console.log("[SIM] Simulation reset");
             }
+            function activatePeakHours()
+            {
+                if (!automationRunning || peakHoursActive) return;
+                peakHoursActive = true;
+                peakStartedAt = performance.now();
+                dataCollector.peakHoursActive = true; 
+                document.getElementById("peak").disabled = true;
+                document.getElementById("peak").textContent = "Peak Hours (Active)";
+                dataCollector.logEvent("system", null, "peak hours started", []);
+                console.log("[PEAK] Peak hours activated");
+                //Halve both interval cadences by clearing and recreating them
+                clearInterval(enqueueInterval);
+                clearInterval(dispatchInterval);
+                enqueueInterval = setInterval(() => { if(automationRunning) enqueueWeightedRandom(); }, 3500); //Refer to functions file
+                dispatchInterval = setInterval(() => { if (automationRunning) dispatchNextFlow(); }, 1000); //2000/2
+                //Auto-deactivate after PEAK_HOURS_IRL_MS
+                peakHoursTimeout = setTimeout(() => deactivatePeakHours(), PEAK_HOURS_IRL_MS);
+            }
+            function deactivatePeakHours()
+            {
+                if (!peakHoursActive) return;
+                peakHoursActive = false;
+                peakStartedAt = null;
+                dataCollector.peakHoursActive = false;
+                if (peakHoursTimeout) { clearTimeout(peakHoursTimeout); peakHoursTimeout = null; }
+                document.getElementById("peak").textContent = "Peak Hours";
+                document.getElementById("peak").disabled = !automationRunning; // Re-enable only if sim still running
+                dataCollector.logEvent("system", null, "peak hours ended", []);
+                console.log("[PEAK] Peak hours deactivated");
+                //Restore normal cadences
+                clearInterval(enqueueInterval);
+                clearInterval(dispatchInterval);
+                enqueueInterval = setInterval(() => { if(automationRunning) enqueueWeightedRandom(); }, 7000); //Refer to functions file
+                dispatchInterval = setInterval(() => { if (automationRunning) dispatchNextFlow(); }, 2000);
+            }
+            document.getElementById("peak").addEventListener("click", () => {
+                if (automationRunning && !peakHoursActive) activatePeakHours();
+            });
             let hitboxDebug = false;
             document.getElementById("hitbox").addEventListener("click", () =>
             {
@@ -330,26 +392,78 @@
                 document.getElementById("hitbox").textContent = hitboxDebug ? "Hide Hitboxes" : "Hitbox Debug";
             });
             //Sim Loops
-            setInterval(()=>
-            {
-                updateBoxes(allBoxes);
-                if(!automationRunning) return;
-                if(Math.random() < 0.7) processOutbound(allBoxes);
-                else processDelivery(allBoxes);
-            }, 7000); //Combined flow loop: 70% outbound, 30% inbound
-            //setInterval(()=>{ if(automationRunning) processOrder(allBoxes); updateBoxes(allBoxes); },7000); //Order Loop
-            setInterval(async ()=>{ if(automationRunning && workerPool.workers.some(w=>!w.busy)) await workerPool.repositionAllIdle(); },8000);
-            setInterval(()=>{ if(automationRunning) checkReorderTriggers(allBoxes); },100); //Failsafe1 checker
-            setInterval(()=>{ if(automationRunning) processSupplierQueue(); },3000); //Failsafe1: Emergency restock
-            setInterval(()=>{ if(automationRunning) processOverflow(allBoxes); },2000); //Failsafe2: Too much stock
-            setInterval(() => { if(automationRunning) dataCollector.logFPS(fps); },2000); //FPS Tracking, per 2 seconds
-            setInterval(()=>{ updateHUD(); },100); //HUD Update
+            let peakHoursActive  = false;
+            let peakHoursTimeout = null; //handle for the auto-deactivation setTimeout
+            let peakHoursStartTime = null; //timestamp for when peak hours started, used for HUD countdown
+            let enqueueInterval  = null; //handle for the replaceable enqueue setInterval
+            let dispatchInterval = null; //handle for the replaceable dispatch setInterval
+            enqueueInterval = setInterval(() => { if(automationRunning) enqueueWeightedRandom(); }, 7000); //Refer to functions file
+            setInterval(async ()=> { 
+                if(automationRunning && workerPool.workers.some(w=>!w.busy)) await workerPool.repositionAllIdle(); },8000);
+            setInterval(()=> { if(automationRunning) checkReorderTriggers(allBoxes); },100); //Failsafe1 checker
+            //setInterval(()=> { if(automationRunning) processOverflow(allBoxes); },2000); //Failsafe2: Too much stock, may be removed
+            dispatchInterval = setInterval(()=> { if(automationRunning) dispatchNextFlow();}, 2000); //Unified Dispather
+            setInterval(()=> { if(automationRunning) dataCollector.logFPS(fps); },2000); //FPS Tracking, per 2 seconds
+            setInterval(()=> { updateHUD(); },100); //HUD Update
+            setInterval(() => { if (automationRunning) dataCollector.logHeatmap();}, 5000); //5 real secs = every 5 sim-min interval
             //Resize
             window.addEventListener("resize",()=>{
             camera.aspect=window.innerWidth/window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth,window.innerHeight);
             });
+            //TILE GRID
+            buildGrid();
+            initDoorwayTiles();
+            initTransitTiles();
+            //Layout-specific rack corridor transit tiles for this layout
+            //Right corridor (racks 5-8, only path to staging from east rack pair)
+            [-10, -8, -6, -4, -2].forEach(z => markTransitTile(-17, z));
+            //Left corridor (racks 1-4)
+            [-10, -8, -6, -4, -2].forEach(z => markTransitTile(-25, z));
+            //Cross corridor safeguard
+            [-10, -8, -2].forEach(z => { markTransitTile(-19, z); markTransitTile(-21, z); });
+            // --- HARD BLOCK STORAGE WALLS (prevents A* phasing through) ---
+            markBlockedArea(16.5, 30, -1, 1); // Wall 8 (top horizontal)
+            markBlockedArea(15.5, 17.5, -15, -4); // Wall 9 (left vertical)
+            markBlockedArea(15.5, 17.5, -1, 1); // Wall 10 (door stub)
+            markBlockedArea(-22.9, -20.4, -12.4,  -7.7); // rack3+rack5 combined (back-to-back, touching)
+            markBlockedArea(-22.9, -20.4,  -7.3,  -2.7); // rack4+rack6 combined (back-to-back, touching)
+            markBlockedArea(-14.9, -13.1, -12.4,  -7.7); // rack7
+            markBlockedArea(-14.9, -13.1,  -7.3,  -2.7); // rack8
+            //createTileDebug(scene); //Tile debug
+            //Register all interaction areas — must be after buildGrid() and obstacles are set
+            //Medicine racks
+            racks.slice(0, 8).forEach((rack, i) => {
+                const p = new THREE.Vector3();
+                rack.interactionArea.getWorldPosition(p);
+                registerIA('rack_' + (i + 1), p.x, p.z);
+            });
+            //Outbound rack
+            const outboundIAPos = new THREE.Vector3();
+            outboundRack.interactionArea.getWorldPosition(outboundIAPos);
+            registerIA('outbound', outboundIAPos.x, outboundIAPos.z);
+            //Desk
+            const deskIAPos = new THREE.Vector3();
+            desk.interactionArea.getWorldPosition(deskIAPos);
+            registerIA('desk', deskIAPos.x, deskIAPos.z);
+            //Counter
+            const counterIAPos = new THREE.Vector3();
+            counter.interactionArea.getWorldPosition(counterIAPos);
+            registerIA('counter', counterIAPos.x, counterIAPos.z);
+            //Storage area
+            const storageIAPos = new THREE.Vector3();
+            storageArea.interactionArea.getWorldPosition(storageIAPos);
+            registerIA('storage', storageIAPos.x, storageIAPos.z);
+            //Staging (6 IAs)
+            staging.interactionAreas.forEach((ia, i) => {
+                const p = new THREE.Vector3();
+                ia.getWorldPosition(p);
+                registerIA('staging_' + i, p.x, p.z);
+            });
+            //Place workers and mark starting tiles
+            workerPool.setInitialPositions(INITIAL_POSITIONS);
+            workerPool.workers.forEach(w => occupyInitialTile(w));
             //Animating
             function animate()
             {
@@ -399,7 +513,9 @@
                 //Newer detailed format
                 const numberedData = data.map((row, index) => ({
                     No: index + 1,
-                    time: row.time,
+                    runtime: row.runtime,
+                    time_min: row.time_min,
+                    situation: row.situation,
                     flow_type: row.flow_type,
                     worker: row.worker,
                     activity: row.activity,
@@ -413,6 +529,26 @@
 
                 const fpsSheet = XLSX.utils.json_to_sheet(dataCollector.fpsRecords);
                 XLSX.utils.book_append_sheet(workbook, fpsSheet, "FPS Log");
+
+                const customerSheet = XLSX.utils.json_to_sheet(
+                    dataCollector.customerRecords.map((r, i) => ({ No: i + 1, ...r }))
+                    );
+                XLSX.utils.book_append_sheet(workbook, customerSheet, "Customer Log");
+
+                const errorSheet = XLSX.utils.json_to_sheet(
+                    dataCollector.errorRecords.map((r, i) => ({ No: i + 1, ...r }))
+                );
+                XLSX.utils.book_append_sheet(workbook, errorSheet, "Error Log");
+
+                const heatmapSheet = XLSX.utils.json_to_sheet(
+                    dataCollector.heatmapRecords.map((r, i) => ({ No: i + 1, ...r }))
+                );
+                XLSX.utils.book_append_sheet(workbook, heatmapSheet, "Heatmap Log");
+
+                const movementSheet = XLSX.utils.json_to_sheet(
+                    dataCollector.movementRecords.map((r, i) => ({ No: i + 1, ...r }))
+                );
+                XLSX.utils.book_append_sheet(workbook, movementSheet, "Movement Log");
 
                 XLSX.writeFile(workbook, "pharmacy_simulation.xlsx");
             }

@@ -1,7 +1,6 @@
-//movement.js, here be movement specific patches, still no pathfinding but slightly guardrailed simple movement
-//well the slightly does a lot of lifting, it's a patchwork of messy deadlock preventions
-//implementation still at functions.js btw, so is the heavily patched moveToWorldPosition in worker.js
+///OLD MOVEMENT FUNCTIONS, including a lot of patchwork and questionable patches
 
+//Door Points/Coords
 const DOOR_OUTSIDE = { x: 14.5, z: -2 }; //Main floor side of storage entrance
 const DOOR_INSIDE = { x: 18.5, z: -2 }; //Inside storage room corridor
 const DOOR_WAIT = { x: 11, z: -2 }; //Waiting point allowing leaving worker passage
